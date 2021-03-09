@@ -37,6 +37,7 @@
   },
   "Traders": {
     "Example": "secret",
-    "TraderOne": "secret"
+    "TraderOne": "secret",
+    "GoodTrader": "secret"
   }
 }
