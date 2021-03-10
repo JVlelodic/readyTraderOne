@@ -17,6 +17,8 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
+import numpy as np
+import pandas as pd
 
 from typing import List
 
@@ -26,7 +28,7 @@ from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
 LOT_SIZE = 10
 POSITION_LIMIT = 1000
 TICK_SIZE_IN_CENTS = 100
-
+UPDATE_LIST_SIZE = 5
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -46,10 +48,16 @@ class AutoTrader(BaseAutoTrader):
         self.asks = set()
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
 
-        # Sequence number to update the moving average on order_book updates
-        self.next_tick_update = 1
+        # Current sequence number to update on order_book_updates function
+        self.order_update_number = 1
+
+        # Current sequence number to update the on_trade_ticks function
+        self.trade_update_number = 1
+
         # List of the average prices of the instrument, where list[i] is the price for instrument i
         self.average_instrument_price = [0, 0]
+        
+        #
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -62,20 +70,19 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id != 0:
             self.on_order_status_message(client_order_id, 0, 0, 0)
 
-    def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
-                                     ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-        """Called periodically to report the status of an order book.
+    # def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
+    #                                  ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+    #     """Called periodically to report the status of an order book.
 
-        The sequence number can be used to detect missed or out-of-order
-        messages. The five best available ask (i.e. sell) and bid (i.e. buy)
-        prices are reported along with the volume available at each of those
-        price levels.
-        """
-        #Only recalculate average on new sequence number
-        if sequence_number == self.next_tick_update: 
-            self.calculate_average(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            self.next_tick_update += 1
-
+    #     The sequence number can be used to detect missed or out-of-order
+    #     messages. The five best available ask (i.e. sell) and bid (i.e. buy)
+    #     prices are reported along with the volume available at each of those
+    #     price levels.
+    #     """
+    #    # Only recalculate average on new sequence number
+    #     if sequence_number == self.order_update_number: 
+    #         self.calculate_average(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
+    #         self.order_update_number += 1
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -112,20 +119,39 @@ class AutoTrader(BaseAutoTrader):
 
     def calculate_average(self, instrument: int, sequence_number: int, ask_prices: List[int],
                           ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-        # VWAP from ask orders
         ask_total_volume = 0
         ask_total_value = 0
-        for i in range(len(ask_prices)):
-            ask_total_volume += ask_volumes[i]
-            ask_total_value += ask_volumes[i] * ask_prices[i]
-        ask_vwap = ask_total_value // ask_total_volume
-        print("Ask VWAP is: ", ask_vwap)
 
-        # VWAP from bid orders
         bid_total_volume = 0
         bid_total_value = 0
-        for i in range(len(bid_prices)):
+        
+        #
+        for i in range(UPDATE_LIST_SIZE):
+            #VWAP from ask orders
+            ask_total_volume += ask_volumes[i]
+            ask_total_value += ask_volumes[i] * ask_prices[i]
+        
+            # VWAP from bid orders
             bid_total_volume += bid_volumes[i]
             bid_total_value += bid_volumes[i] * bid_prices[i]
+            
+        ask_vwap = ask_total_value // ask_total_volume
         bid_vwap = bid_total_value // bid_total_volume
-        print("Bid VWAP is: ", bid_vwap)
+    
+    def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
+                            ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+        total_volume = 0
+        total_price = 0
+        if sequence_number > self.trade_update_number:
+            print("Sequence number is: ", sequence_number)
+            self.trade_update_number = sequence_number
+
+            for i in range(UPDATE_LIST_SIZE):
+                total_volume += bid_volumes[i] + ask_volumes[i]
+                total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
+
+            average_price = total_price // total_volume
+            print("Average price is ", average_price)
+            print(dict(zip(ask_prices, ask_volumes)))
+            print(dict(zip(bid_prices, bid_volumes)))
+            print("\n")
