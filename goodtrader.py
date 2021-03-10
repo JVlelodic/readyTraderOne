@@ -18,6 +18,8 @@
 import asyncio
 import itertools
 import math
+import numpy as np
+from scipy.signal import find_peaks
 
 from typing import List
 
@@ -48,16 +50,22 @@ class AutoTrader(BaseAutoTrader):
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
 
         # Current sequence number to update on order_book_updates function
-        self.order_update_number = 1
+        self.order_update_number = [1,1]
 
         # Current sequence number to update the on_trade_ticks function
-        self.trade_update_number = 1
+        self.trade_update_number = [1,1]
 
         # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
         self.vwaps = [[0,0], [0,0]]
 
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
         self.market_prices = [[],[]]
+
+        # Most recent resistance line value
+        self.resist = None
+        
+        # most recent support line value
+        self.support = None
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -81,9 +89,11 @@ class AutoTrader(BaseAutoTrader):
         """
         
        # Only recalculate average on new sequence number
-        if sequence_number > self.order_update_number: 
+        if sequence_number > self.order_update_number[instrument]: 
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            self.order_update_number = sequence_number
+            self.order_update_number[instrument] = sequence_number
+        
+        self.calculate_support(instrument)
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -120,11 +130,11 @@ class AutoTrader(BaseAutoTrader):
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
                                 ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-       
-        if sequence_number > self.trade_update_number:
-            self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            self.trade_update_number = sequence_number
 
+        if sequence_number > self.trade_update_number[instrument]:
+            self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            self.trade_update_number[instrument] = sequence_number
+        
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
                                 bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -136,10 +146,6 @@ class AutoTrader(BaseAutoTrader):
 
             average_price = total_price // total_volume
             self.market_prices[instrument].append(average_price)
-            
-            print("Average price is ", average_price)
-            print(self.market_prices)
-            print("\n")
 
     def calculate_vwap(self, instrument: int, ask_prices: List[int],
                         ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -163,3 +169,18 @@ class AutoTrader(BaseAutoTrader):
         
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
+
+    #FIX for instrument
+    def calculate_support(self, instrument: int) -> None:
+        prices = np.array(self.market_prices[instrument][-500:])
+        if len(prices) < 200:
+            return
+        
+        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        peaks, _ = find_peaks(prices, height=midpoint)
+        res: np.ndarray = prices[peaks]
+        print(res)
+        
+        self.resist = res.sum() / res.size
+        print("Average is: ", self.resist)
+        print()
