@@ -46,13 +46,19 @@ class AutoTrader(BaseAutoTrader):
         self.asks = set()
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
 
+        # Sequence number to update the moving average on order_book updates
+        self.next_tick_update = 1
+        # List of the average prices of the instrument, where list[i] is the price for instrument i
+        self.average_instrument_price = [0, 0]
+
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
 
         If the error pertains to a particular order, then the client_order_id
         will identify that order, otherwise the client_order_id will be zero.
         """
-        self.logger.warning("error with order %d: %s", client_order_id, error_message.decode())
+        self.logger.warning("error with order %d: %s",
+                            client_order_id, error_message.decode())
         if client_order_id != 0:
             self.on_order_status_message(client_order_id, 0, 0, 0)
 
@@ -65,9 +71,11 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        print(ask_prices)
-        print(ask_volumes)
-        print("Sequence number is" + sequence_number)
+        #Only recalculate average on new sequence number
+        if sequence_number == self.next_tick_update: 
+            self.calculate_average(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            self.next_tick_update += 1
+
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -101,3 +109,23 @@ class AutoTrader(BaseAutoTrader):
             # It could be either a bid or an ask
             self.bids.discard(client_order_id)
             self.asks.discard(client_order_id)
+
+    def calculate_average(self, instrument: int, sequence_number: int, ask_prices: List[int],
+                          ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+        # VWAP from ask orders
+        ask_total_volume = 0
+        ask_total_value = 0
+        for i in range(len(ask_prices)):
+            ask_total_volume += ask_volumes[i]
+            ask_total_value += ask_volumes[i] * ask_prices[i]
+        ask_vwap = ask_total_value // ask_total_volume
+        print("Ask VWAP is: ", ask_vwap)
+
+        # VWAP from bid orders
+        bid_total_volume = 0
+        bid_total_value = 0
+        for i in range(len(bid_prices)):
+            bid_total_volume += bid_volumes[i]
+            bid_total_value += bid_volumes[i] * bid_prices[i]
+        bid_vwap = bid_total_value // bid_total_volume
+        print("Bid VWAP is: ", bid_vwap)
