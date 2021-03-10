@@ -18,7 +18,9 @@
 import asyncio
 import itertools
 import math
+import pandas as pd
 
+from statistics import mean
 from typing import List
 
 from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
@@ -59,6 +61,10 @@ class AutoTrader(BaseAutoTrader):
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
         self.market_prices = [[],[]]
 
+        # Variables used for SMA BUY SELL strategy
+        self.sma_20_prev = 0
+        self.sma_100_prev = 0
+
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
 
@@ -79,7 +85,6 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number: 
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
@@ -123,7 +128,33 @@ class AutoTrader(BaseAutoTrader):
        
         if sequence_number > self.trade_update_number:
             self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            #print(self.market_prices)
+
+            #Calculate current and previous SMA
+            sma_20 = self.calculate_sma(20)
+            sma_100 = self.calculate_sma(200)
+            #print("SMA20",sma_20)
+            #print("SMA100",sma_100)
+            if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
+                self.bid_id = next(self.order_ids)
+                #print(bid_prices)
+                self.send_insert_order(self.bid_id, Side.BUY, bid_prices[0]-200, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                self.bids.add(self.bid_id)
+                #print("BUY")
+                #BUY
+            
+            if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
+                #SELL
+                self.bid_id = next(self.order_ids)
+                self.send_insert_order(self.bid_id, Side.SELL, ask_prices[0]+200, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                self.bids.add(self.bid_id)
+                #print("SELL")
+
+            self.sma_20_prev = sma_20
+            self.sma_100_prev = sma_100
+
             self.trade_update_number = sequence_number
+            
 
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
@@ -137,9 +168,9 @@ class AutoTrader(BaseAutoTrader):
             average_price = total_price // total_volume
             self.market_prices[instrument].append(average_price)
             
-            print("Average price is ", average_price)
-            print(self.market_prices)
-            print("\n")
+            #print("Average price is ", average_price)
+            #print(self.market_prices)
+            #print("\n")
 
     def calculate_vwap(self, instrument: int, ask_prices: List[int],
                         ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -163,3 +194,8 @@ class AutoTrader(BaseAutoTrader):
         
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
+    
+    def calculate_sma(self, period: int):
+        tail = self.market_prices[1][-period:]#currently hardcoded for the ETF or something
+        
+        return mean(tail)
