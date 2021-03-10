@@ -17,6 +17,7 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
+import math
 
 from typing import List
 
@@ -52,8 +53,11 @@ class AutoTrader(BaseAutoTrader):
         # Current sequence number to update the on_trade_ticks function
         self.trade_update_number = 1
 
-        # List of the average prices of the instrument, where list[i] is the price for instrument i
-        self.average_instrument_price = [0, 0]
+        # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
+        self.vwaps = [[0,0], [0,0]]
+
+        # List of market prices for instruments, where list[i] contains list of market prices for instrument i
+        self.market_prices = [[],[]]
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -114,42 +118,48 @@ class AutoTrader(BaseAutoTrader):
             self.bids.discard(client_order_id)
             self.asks.discard(client_order_id)
 
-    def calculate_vwap(self, instrument: int, ask_prices: List[int],
-                          ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-        ask_total_volume = 0
-        ask_total_value = 0
+    def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
+                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+       
+        if sequence_number > self.trade_update_number:
+            self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            self.trade_update_number = sequence_number
 
+    
+    def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
+                                bid_prices: List[int], bid_volumes: List[int]) -> None:
+        total_volume = 0
+        total_price = 0
+        for i in range(UPDATE_LIST_SIZE):
+            total_volume += bid_volumes[i] + ask_volumes[i]
+            total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
+
+            average_price = total_price // total_volume
+            self.market_prices[instrument].append(average_price)
+            
+            print("Average price is ", average_price)
+            print(self.market_prices)
+            print("\n")
+
+    def calculate_vwap(self, instrument: int, ask_prices: List[int],
+                        ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         bid_total_volume = 0
         bid_total_value = 0
+
+        ask_total_volume = 0
+        ask_total_value = 0
         
         for i in range(UPDATE_LIST_SIZE):
+            # VWAP from bid orders
+            bid_total_volume += bid_volumes[i]
+            bid_total_value += bid_volumes[i] * bid_prices[i]
+
             #VWAP from ask orders
             ask_total_volume += ask_volumes[i]
             ask_total_value += ask_volumes[i] * ask_prices[i]
         
-            # VWAP from bid orders
-            bid_total_volume += bid_volumes[i]
-            bid_total_value += bid_volumes[i] * bid_prices[i]
-            
-        ask_vwap = ask_total_value // ask_total_volume
-        bid_vwap = bid_total_value // bid_total_volume
+        bid_vwap = math.floor(bid_total_value / bid_total_volume)
+        ask_vwap = math.ceil(ask_total_value / ask_total_volume)
         
-    
-    def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
-                            ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-        total_volume = 0
-        total_price = 0
-        if sequence_number > self.trade_update_number:
-            print("Sequence number is: ", sequence_number)
-            self.trade_update_number = sequence_number
-
-            for i in range(UPDATE_LIST_SIZE):
-                total_volume += bid_volumes[i] + ask_volumes[i]
-                total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
-
-            average_price = total_price // total_volume
-            
-            print("Average price is ", average_price)
-            print(dict(zip(ask_prices, ask_volumes)))
-            print(dict(zip(bid_prices, bid_volumes)))
-            print("\n")
+        self.vwaps[instrument][0] = bid_vwap
+        self.vwaps[instrument][1] = ask_vwap
