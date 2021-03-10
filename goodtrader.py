@@ -17,8 +17,6 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
-import numpy as np
-import pandas as pd
 
 from typing import List
 
@@ -56,8 +54,6 @@ class AutoTrader(BaseAutoTrader):
 
         # List of the average prices of the instrument, where list[i] is the price for instrument i
         self.average_instrument_price = [0, 0]
-        
-        #
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -70,19 +66,20 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id != 0:
             self.on_order_status_message(client_order_id, 0, 0, 0)
 
-    # def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
-    #                                  ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-    #     """Called periodically to report the status of an order book.
+    def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
+                                     ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+        """Called periodically to report the status of an order book.
 
-    #     The sequence number can be used to detect missed or out-of-order
-    #     messages. The five best available ask (i.e. sell) and bid (i.e. buy)
-    #     prices are reported along with the volume available at each of those
-    #     price levels.
-    #     """
-    #    # Only recalculate average on new sequence number
-    #     if sequence_number == self.order_update_number: 
-    #         self.calculate_average(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
-    #         self.order_update_number += 1
+        The sequence number can be used to detect missed or out-of-order
+        messages. The five best available ask (i.e. sell) and bid (i.e. buy)
+        prices are reported along with the volume available at each of those
+        price levels.
+        """
+        
+       # Only recalculate average on new sequence number
+        if sequence_number > self.order_update_number: 
+            self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            self.order_update_number = sequence_number
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -117,7 +114,7 @@ class AutoTrader(BaseAutoTrader):
             self.bids.discard(client_order_id)
             self.asks.discard(client_order_id)
 
-    def calculate_average(self, instrument: int, sequence_number: int, ask_prices: List[int],
+    def calculate_vwap(self, instrument: int, ask_prices: List[int],
                           ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         ask_total_volume = 0
         ask_total_value = 0
@@ -125,7 +122,6 @@ class AutoTrader(BaseAutoTrader):
         bid_total_volume = 0
         bid_total_value = 0
         
-        #
         for i in range(UPDATE_LIST_SIZE):
             #VWAP from ask orders
             ask_total_volume += ask_volumes[i]
@@ -137,6 +133,7 @@ class AutoTrader(BaseAutoTrader):
             
         ask_vwap = ask_total_value // ask_total_volume
         bid_vwap = bid_total_value // bid_total_volume
+        
     
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
                             ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -151,6 +148,7 @@ class AutoTrader(BaseAutoTrader):
                 total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
 
             average_price = total_price // total_volume
+            
             print("Average price is ", average_price)
             print(dict(zip(ask_prices, ask_volumes)))
             print(dict(zip(bid_prices, bid_volumes)))
