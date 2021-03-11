@@ -47,7 +47,7 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1)
         self.bids = set()
         self.asks = set()
-        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
+        self.ask_price = self.bid_price = self.position = 0
 
         # Current sequence number to update on order_book_updates function
         self.order_update_number = 1
@@ -114,10 +114,6 @@ class AutoTrader(BaseAutoTrader):
         If an order is cancelled its remaining volume will be zero.
         """
         if remaining_volume == 0:
-            if client_order_id == self.bid_id:
-                self.bid_id = 0
-            elif client_order_id == self.ask_id:
-                self.ask_id = 0
 
             # It could be either a bid or an ask
             self.bids.discard(client_order_id)
@@ -132,22 +128,25 @@ class AutoTrader(BaseAutoTrader):
 
             #Calculate current and previous SMA
             sma_20 = self.calculate_sma(20)
-            sma_100 = self.calculate_sma(200)
+            sma_100 = self.calculate_sma(100)
             #print("SMA20",sma_20)
+            #print(sequence_number)
             #print("SMA100",sma_100)
             if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
-                self.bid_id = next(self.order_ids)
-                #print(bid_prices)
-                self.send_insert_order(self.bid_id, Side.BUY, bid_prices[0]-200, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.bids.add(self.bid_id)
-                #print("BUY")
                 #BUY
-            
+                self.cancel_all_orders(Side.SELL)
+                self.cancel_all_orders(Side.BUY)
+                self.insert_order_buy(bid_prices[0],10)
+
+
+                #print("BUY")
+                
             if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
                 #SELL
-                self.bid_id = next(self.order_ids)
-                self.send_insert_order(self.bid_id, Side.SELL, ask_prices[0]+200, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.bids.add(self.bid_id)
+                self.cancel_all_orders(Side.BUY)
+                self.cancel_all_orders(Side.SELL)
+                self.insert_order_sell(bid_prices[0],10)
+
                 #print("SELL")
 
             self.sma_20_prev = sma_20
@@ -199,3 +198,23 @@ class AutoTrader(BaseAutoTrader):
         tail = self.market_prices[1][-period:]#currently hardcoded for the ETF or something
         
         return mean(tail)
+    
+    def cancel_all_orders(self, side: int):
+        if side == Side.BUY:
+            for order in self.bids:
+                self.send_cancel_order(order)
+            self.bids.clear()
+        elif side == Side.SELL:
+            for order in self.asks:
+                self.send_cancel_order(order)
+            self.asks.clear()
+    
+    def insert_order_buy(self, price: int, amount: int):
+        bid_id = next(self.order_ids)
+        self.send_insert_order(bid_id, Side.BUY, price-100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
+        self.bids.add(bid_id)
+    
+    def insert_order_sell(self, price: int, amount: int):
+        bid_id = next(self.order_ids)
+        self.send_insert_order(bid_id, Side.SELL, price+100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
+        self.asks.add(bid_id)
