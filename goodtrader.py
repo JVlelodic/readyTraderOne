@@ -18,8 +18,10 @@
 import asyncio
 import itertools
 import math
+from struct import error
 import numpy as np
 from scipy.signal import find_peaks
+from scipy.stats import linregress
 
 from typing import List
 
@@ -56,16 +58,22 @@ class AutoTrader(BaseAutoTrader):
         self.trade_update_number = [1,1]
 
         # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
-        self.vwaps = [[0,0], [0,0]]
+        self.vwaps = [[None, None], [None, None]]
 
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
         self.market_prices = [[],[]]
 
         # Most recent resistance line value
-        self.resist = None
+        self.resist = [None, None]
         
-        # most recent support line value
-        self.support = None
+        # Most recent support line value
+        self.support = [None, None]
+
+        # Gradient of recent trend
+        self.slope = [None, None]
+
+        # R2 Coefficient
+        self.r2 = [None, None]
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -93,7 +101,9 @@ class AutoTrader(BaseAutoTrader):
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
             self.order_update_number[instrument] = sequence_number
         
+        self.calculate_resist(instrument)
         self.calculate_support(instrument)
+        self.calculate_regression(instrument)
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -170,17 +180,43 @@ class AutoTrader(BaseAutoTrader):
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
 
-    #FIX for instrument
-    def calculate_support(self, instrument: int) -> None:
-        prices = np.array(self.market_prices[instrument][-500:])
-        if len(prices) < 200:
+    
+    def calculate_resist(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 500:
             return
         
+        prices = np.array(self.market_prices[instrument][-500:])
         midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
         peaks, _ = find_peaks(prices, height=midpoint)
-        res: np.ndarray = prices[peaks]
-        print(res)
+    
+        res: np.ndarray = prices[peaks]   
+        if res.size == 0:
+            return
+
+        self.resist[instrument] = res.sum() / res.size
         
-        self.resist = res.sum() / res.size
-        print("Average is: ", self.resist)
-        print()
+    def calculate_support(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 500:
+            return
+
+        prices = np.array(self.market_prices[instrument][-500:])        
+        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        reverse_prices = (prices - midpoint) * -1
+        peaks, _ = find_peaks(reverse_prices, height = 0)
+        support: np.ndarray = prices[peaks]
+        if support.size == 0:
+            return
+        
+        self.support[instrument] = support.sum() / support.size
+
+    def calculate_regression(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 1000:
+            return
+        
+        prices = np.array(self.market_prices[instrument][-1000:])
+        result = linregress(list(range(1000)), prices)
+
+        self.slope[instrument] = result.slope
+        self.r2[instrument] = result.rvalue**2 
+        
+        
