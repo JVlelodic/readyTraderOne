@@ -18,11 +18,13 @@
 import asyncio
 import itertools
 import math
+import pandas as pd
 from struct import error
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.stats import linregress
 
+from statistics import mean
 from typing import List
 
 from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
@@ -49,7 +51,7 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1)
         self.bids = set()
         self.asks = set()
-        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
+        self.ask_price = self.bid_price = self.position = 0
 
         # Current sequence number to update on order_book_updates function
         self.order_update_number = [1,1]
@@ -62,6 +64,10 @@ class AutoTrader(BaseAutoTrader):
 
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
         self.market_prices = [[],[]]
+
+        # Variables used for SMA BUY SELL strategy
+        self.sma_20_prev = 0
+        self.sma_100_prev = 0
 
         # Most recent resistance line value
         self.resist = [None, None]
@@ -95,7 +101,6 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]: 
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
@@ -129,10 +134,6 @@ class AutoTrader(BaseAutoTrader):
         If an order is cancelled its remaining volume will be zero.
         """
         if remaining_volume == 0:
-            if client_order_id == self.bid_id:
-                self.bid_id = 0
-            elif client_order_id == self.ask_id:
-                self.ask_id = 0
 
             # It could be either a bid or an ask
             self.bids.discard(client_order_id)
@@ -140,11 +141,38 @@ class AutoTrader(BaseAutoTrader):
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
                                 ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-
-        if sequence_number > self.trade_update_number[instrument]:
+      
+        if sequence_number > self.trade_update_number:
             self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            self.trade_update_number[instrument] = sequence_number
-        
+            #print(self.market_prices)
+
+            #Calculate current and previous SMA
+            sma_20 = self.calculate_sma(20)
+            sma_100 = self.calculate_sma(100)
+            #print("SMA20",sma_20)
+            #print(sequence_number)
+            #print("SMA100",sma_100)
+            if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
+                #BUY
+                self.cancel_all_orders(Side.SELL)
+                self.cancel_all_orders(Side.BUY)
+                self.insert_order_buy(bid_prices[0],10)
+
+
+                #print("BUY")
+                
+            if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
+                #SELL
+                self.cancel_all_orders(Side.BUY)
+                self.cancel_all_orders(Side.SELL)
+                self.insert_order_sell(bid_prices[0],10)
+
+                #print("SELL")
+
+            self.sma_20_prev = sma_20
+            self.sma_100_prev = sma_100
+
+            self.trade_update_number = sequence_number
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
                                 bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -179,8 +207,32 @@ class AutoTrader(BaseAutoTrader):
         
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
-
+        
+    def calculate_sma(self, period: int):
+        tail = self.market_prices[1][-period:]#currently hardcoded for the ETF or something
+        
+        return mean(tail)
     
+    def cancel_all_orders(self, side: int):
+        if side == Side.BUY:
+            for order in self.bids:
+                self.send_cancel_order(order)
+            self.bids.clear()
+        elif side == Side.SELL:
+            for order in self.asks:
+                self.send_cancel_order(order)
+            self.asks.clear()
+    
+    def insert_order_buy(self, price: int, amount: int):
+        bid_id = next(self.order_ids)
+        self.send_insert_order(bid_id, Side.BUY, price-100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
+        self.bids.add(bid_id)
+    
+    def insert_order_sell(self, price: int, amount: int):
+        bid_id = next(self.order_ids)
+        self.send_insert_order(bid_id, Side.SELL, price+100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
+        self.asks.add(bid_id)
+
     def calculate_resist(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 500:
             return
@@ -218,5 +270,4 @@ class AutoTrader(BaseAutoTrader):
 
         self.slope[instrument] = result.slope
         self.r2[instrument] = result.rvalue**2 
-        
         
