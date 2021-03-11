@@ -19,6 +19,8 @@ import asyncio
 import itertools
 import math
 import pandas as pd
+import heapq
+
 from struct import error
 import numpy as np
 from scipy.signal import find_peaks
@@ -56,7 +58,7 @@ class AutoTrader(BaseAutoTrader):
         # Current sequence number to update on order_book_updates function
         self.order_update_number = [1,1]
 
-        # Current sequence number to update the on_trade_ticks function
+        # Current sequence number to update the on_trade_ticks functiondxs  
         self.trade_update_number = [1,1]
 
         # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
@@ -68,6 +70,10 @@ class AutoTrader(BaseAutoTrader):
         # Variables used for SMA BUY SELL strategy
         self.sma_20_prev = 0
         self.sma_100_prev = 0
+
+        # orderbook for short and long position
+        self.position_constitution = []
+        heapq.heapify(self.position_constitution)
 
         # Most recent resistance line value
         self.resist = [None, None]
@@ -118,9 +124,44 @@ class AutoTrader(BaseAutoTrader):
         the number of lots filled at that price.
         """
         if client_order_id in self.bids:
+            print("bid")
+            #if short position
+            if self.position < 0:
+                #check if we go positive
+                if volume >= abs(self.position):
+                    for n in range(len(self.position_constitution)):
+                        heapq.heappop(self.position_constitution)
+                        if volume > abs(self.position):
+                            heapq.heappush(self.position_constitution,[-price,volume+self.position])
+            else:
+                for element in self.position_constitution:
+                    if(-price == element[0]):
+                        element[1] += volume
+                        break
+                heapq.heappush(self.position_constitution,[-price,volume])
             self.position += volume
+            print(self.position)
+            print(self.position_constitution)
+            
+
         elif client_order_id in self.asks:
+            print("ask",volume)
+            if self.position > 0:
+                if volume >= self.position:
+                    for n in range(len(self.position_constitution)):
+                        heapq.heappop(self.position_constitution)
+                        if volume > self.position:
+                            #check when selling if we want to counter the largest or the smallest weight
+                            heapq.heappush(self.position_constitution,[price,volume-self.position])
+            else:
+                for element in self.position_constitution:
+                    if price == element[0]:
+                        element[1] += volume
+                        break
+                heapq.heappush(self.position_constitution,[price,volume])
             self.position -= volume
+            print(self.position)
+            print(self.position_constitution)
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -142,7 +183,7 @@ class AutoTrader(BaseAutoTrader):
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
                                 ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
       
-        if sequence_number > self.trade_update_number:
+        if sequence_number > self.trade_update_number[instrument]:
             self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
             #print(self.market_prices)
 
@@ -154,25 +195,27 @@ class AutoTrader(BaseAutoTrader):
             #print("SMA100",sma_100)
             if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
                 #BUY
-                self.cancel_all_orders(Side.SELL)
-                self.cancel_all_orders(Side.BUY)
-                self.insert_order_buy(bid_prices[0],10)
+                if self.position < 900:
+                    self.cancel_all_orders(Side.SELL)
+                    self.cancel_all_orders(Side.BUY)
+                    self.insert_order_buy(bid_prices[0],10)
 
 
                 #print("BUY")
                 
             if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
                 #SELL
-                self.cancel_all_orders(Side.BUY)
-                self.cancel_all_orders(Side.SELL)
-                self.insert_order_sell(bid_prices[0],10)
+                if self.position > -900:
+                    self.cancel_all_orders(Side.BUY)
+                    self.cancel_all_orders(Side.SELL)
+                    self.insert_order_sell(bid_prices[0],10)
 
                 #print("SELL")
 
             self.sma_20_prev = sma_20
             self.sma_100_prev = sma_100
 
-            self.trade_update_number = sequence_number
+            self.trade_update_number[instrument] = sequence_number
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
                                 bid_prices: List[int], bid_volumes: List[int]) -> None:
