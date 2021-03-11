@@ -19,6 +19,10 @@ import asyncio
 import itertools
 import math
 import pandas as pd
+from struct import error
+import numpy as np
+from scipy.signal import find_peaks
+from scipy.stats import linregress
 
 from statistics import mean
 from typing import List
@@ -50,13 +54,13 @@ class AutoTrader(BaseAutoTrader):
         self.ask_price = self.bid_price = self.position = 0
 
         # Current sequence number to update on order_book_updates function
-        self.order_update_number = 1
+        self.order_update_number = [1,1]
 
         # Current sequence number to update the on_trade_ticks function
-        self.trade_update_number = 1
+        self.trade_update_number = [1,1]
 
         # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
-        self.vwaps = [[0,0], [0,0]]
+        self.vwaps = [[None, None], [None, None]]
 
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
         self.market_prices = [[],[]]
@@ -64,6 +68,18 @@ class AutoTrader(BaseAutoTrader):
         # Variables used for SMA BUY SELL strategy
         self.sma_20_prev = 0
         self.sma_100_prev = 0
+
+        # Most recent resistance line value
+        self.resist = [None, None]
+        
+        # Most recent support line value
+        self.support = [None, None]
+
+        # Gradient of recent trend
+        self.slope = [None, None]
+
+        # R2 Coefficient
+        self.r2 = [None, None]
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -86,9 +102,13 @@ class AutoTrader(BaseAutoTrader):
         price levels.
         """
        # Only recalculate average on new sequence number
-        if sequence_number > self.order_update_number: 
+        if sequence_number > self.order_update_number[instrument]: 
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            self.order_update_number = sequence_number
+            self.order_update_number[instrument] = sequence_number
+        
+        self.calculate_resist(instrument)
+        self.calculate_support(instrument)
+        self.calculate_regression(instrument)
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -121,7 +141,7 @@ class AutoTrader(BaseAutoTrader):
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
                                 ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-       
+      
         if sequence_number > self.trade_update_number:
             self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
             #print(self.market_prices)
@@ -153,8 +173,6 @@ class AutoTrader(BaseAutoTrader):
             self.sma_100_prev = sma_100
 
             self.trade_update_number = sequence_number
-            
-
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
                                 bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -166,10 +184,6 @@ class AutoTrader(BaseAutoTrader):
 
             average_price = total_price // total_volume
             self.market_prices[instrument].append(average_price)
-            
-            #print("Average price is ", average_price)
-            #print(self.market_prices)
-            #print("\n")
 
     def calculate_vwap(self, instrument: int, ask_prices: List[int],
                         ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -193,7 +207,7 @@ class AutoTrader(BaseAutoTrader):
         
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
-    
+        
     def calculate_sma(self, period: int):
         tail = self.market_prices[1][-period:]#currently hardcoded for the ETF or something
         
@@ -218,3 +232,42 @@ class AutoTrader(BaseAutoTrader):
         bid_id = next(self.order_ids)
         self.send_insert_order(bid_id, Side.SELL, price+100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
         self.asks.add(bid_id)
+
+    def calculate_resist(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 500:
+            return
+        
+        prices = np.array(self.market_prices[instrument][-500:])
+        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        peaks, _ = find_peaks(prices, height=midpoint)
+    
+        res: np.ndarray = prices[peaks]   
+        if res.size == 0:
+            return
+
+        self.resist[instrument] = res.sum() / res.size
+        
+    def calculate_support(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 500:
+            return
+
+        prices = np.array(self.market_prices[instrument][-500:])        
+        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        reverse_prices = (prices - midpoint) * -1
+        peaks, _ = find_peaks(reverse_prices, height = 0)
+        support: np.ndarray = prices[peaks]
+        if support.size == 0:
+            return
+        
+        self.support[instrument] = support.sum() / support.size
+
+    def calculate_regression(self, instrument: int) -> None:
+        if len(self.market_prices[instrument]) < 1000:
+            return
+        
+        prices = np.array(self.market_prices[instrument][-1000:])
+        result = linregress(list(range(1000)), prices)
+
+        self.slope[instrument] = result.slope
+        self.r2[instrument] = result.rvalue**2 
+        
