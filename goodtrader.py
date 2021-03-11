@@ -124,44 +124,12 @@ class AutoTrader(BaseAutoTrader):
         the number of lots filled at that price.
         """
         if client_order_id in self.bids:
-            print("bid")
-            #if short position
-            if self.position < 0:
-                #check if we go positive
-                if volume >= abs(self.position):
-                    for n in range(len(self.position_constitution)):
-                        heapq.heappop(self.position_constitution)
-                        if volume > abs(self.position):
-                            heapq.heappush(self.position_constitution,[-price,volume+self.position])
-            else:
-                for element in self.position_constitution:
-                    if(-price == element[0]):
-                        element[1] += volume
-                        break
-                heapq.heappush(self.position_constitution,[-price,volume])
             self.position += volume
-            print(self.position)
-            print(self.position_constitution)
+
             
 
         elif client_order_id in self.asks:
-            print("ask",volume)
-            if self.position > 0:
-                if volume >= self.position:
-                    for n in range(len(self.position_constitution)):
-                        heapq.heappop(self.position_constitution)
-                        if volume > self.position:
-                            #check when selling if we want to counter the largest or the smallest weight
-                            heapq.heappush(self.position_constitution,[price,volume-self.position])
-            else:
-                for element in self.position_constitution:
-                    if price == element[0]:
-                        element[1] += volume
-                        break
-                heapq.heappush(self.position_constitution,[price,volume])
             self.position -= volume
-            print(self.position)
-            print(self.position_constitution)
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -188,27 +156,29 @@ class AutoTrader(BaseAutoTrader):
             #print(self.market_prices)
 
             #Calculate current and previous SMA
-            sma_20 = self.calculate_sma(20)
-            sma_100 = self.calculate_sma(100)
+            sma_20 = self.calculate_sma(50)
+            sma_100 = self.calculate_sma(200)
             #print("SMA20",sma_20)
             #print(sequence_number)
             #print("SMA100",sma_100)
             if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
                 #BUY
-                if self.position < 900:
-                    self.cancel_all_orders(Side.SELL)
-                    self.cancel_all_orders(Side.BUY)
-                    self.insert_order_buy(bid_prices[0],10)
+                if self.position < 800:
+                    if(bid_prices[0] != 0):
+                        self.cancel_all_orders(Side.SELL)
+                        self.cancel_all_orders(Side.BUY)
+                        self.insert_order_buy(bid_prices[0],10)
 
 
                 #print("BUY")
                 
             if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
                 #SELL
-                if self.position > -900:
-                    self.cancel_all_orders(Side.BUY)
-                    self.cancel_all_orders(Side.SELL)
-                    self.insert_order_sell(bid_prices[0],10)
+                if self.position > -800:
+                    if(ask_prices[0] != 0):
+                        self.cancel_all_orders(Side.BUY)
+                        self.cancel_all_orders(Side.SELL)
+                        self.insert_order_sell(ask_prices[0],10)
 
                 #print("SELL")
 
