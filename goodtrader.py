@@ -111,10 +111,42 @@ class AutoTrader(BaseAutoTrader):
         if sequence_number > self.order_update_number[instrument]: 
             self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
             self.order_update_number[instrument] = sequence_number
+
+            sma_20 = self.calculate_sma(50)
+            sma_100 = self.calculate_sma(200)
+            #print("SMA20",sma_20)
+            #print(sequence_number)
+            #print("SMA100",sma_100)
+            #print(ask_prices,bid_prices)
+            if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
+                #BUY
+                if self.position < 800:
+                    self.cancel_all_orders(Side.SELL)
+                    #self.cancel_all_orders(Side.BUY)
+                    if len(self.bids) < 3:
+                        self.insert_order_buy(bid_prices[0],5)
+
+
+                #print("BUY")
+                
+            if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
+                #SELL
+                if self.position > -800:
+                    self.cancel_all_orders(Side.BUY)
+                    #self.cancel_all_orders(Side.SELL)
+                    if len(self.asks) < 3:
+                        self.insert_order_sell(ask_prices[0],5)
+
+                #print("SELL")
+
+            self.sma_20_prev = sma_20
+            self.sma_100_prev = sma_100
         
         self.calculate_resist(instrument)
         self.calculate_support(instrument)
         self.calculate_regression(instrument)
+
+        
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -125,11 +157,12 @@ class AutoTrader(BaseAutoTrader):
         """
         if client_order_id in self.bids:
             self.position += volume
-
+            self.bid_price = price
             
 
         elif client_order_id in self.asks:
             self.position -= volume
+            self.ask_price = price
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -156,7 +189,7 @@ class AutoTrader(BaseAutoTrader):
             #print(self.market_prices)
 
             #Calculate current and previous SMA
-            sma_20 = self.calculate_sma(50)
+            """ sma_20 = self.calculate_sma(50)
             sma_100 = self.calculate_sma(200)
             #print("SMA20",sma_20)
             #print(sequence_number)
@@ -184,7 +217,7 @@ class AutoTrader(BaseAutoTrader):
 
             self.sma_20_prev = sma_20
             self.sma_100_prev = sma_100
-
+ """
             self.trade_update_number[instrument] = sequence_number
     
     def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
