@@ -32,8 +32,10 @@ from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
 
 LOT_SIZE = 10
 POSITION_LIMIT = 1000
+VOLUME_LIMIT = 200
 TICK_SIZE_IN_CENTS = 100
 UPDATE_LIST_SIZE = 5
+
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -49,37 +51,54 @@ class AutoTrader(BaseAutoTrader):
         """Initialise a new instance of the AutoTrader class."""
         super().__init__(loop, team_name, secret)
         self.order_ids = itertools.count(1)
-        self.bids = set()
-        self.asks = set()
-        self.ask_price = self.bid_price = self.position = 0
+        self.bids = {}
+        self.asks = {}
+        
+        # List of orders structured as [order_id, price, trade_side, volume]
+        self.active_orders = [] 
+
+        # Range from support and resistance s
+        self.bound_range = 0.001
+
+        # Current positions
+        self.position = [0,0]
+
+        # Current volume for ETF
+        self.volume = 0
+
+        # Ask prices
+        self.ask_price = [0, 0]
+
+        # Bid prices
+        self.bid_price = [0, 0]
 
         # Current sequence number to update on order_book_updates function
-        self.order_update_number = [1,1]
+        self.order_update_number = [1, 1]
 
         # Current sequence number to update the on_trade_ticks function
-        self.trade_update_number = [1,1]
+        self.trade_update_number = [1, 1]
 
         # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
         self.vwaps = [[None, None], [None, None]]
 
         # List of market prices for instruments, where list[i] contains list of market prices for instrument i
-        self.market_prices = [[],[]]
+        self.market_prices = [[], []]
 
         # Variables used for SMA BUY SELL strategy
         self.sma_20_prev = 0
         self.sma_100_prev = 0
 
         # Most recent resistance line value
-        self.resist = [None, None]
-        
+        self.resist = [0, 0]
+
         # Most recent support line value
-        self.support = [None, None]
+        self.support = [0, 0]
 
         # Gradient of recent trend
-        self.slope = [None, None]
+        self.slope = [0, 0]
 
         # R2 Coefficient
-        self.r2 = [None, None]
+        self.r2 = [0, 0]
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -91,6 +110,9 @@ class AutoTrader(BaseAutoTrader):
                             client_order_id, error_message.decode())
         if client_order_id != 0:
             self.on_order_status_message(client_order_id, 0, 0, 0)
+            removed = self.remove_order_id(client_order_id)
+            if removed:
+                self.volume -= removed[3]
 
     def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                      ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -102,13 +124,19 @@ class AutoTrader(BaseAutoTrader):
         price levels.
         """
        # Only recalculate average on new sequence number
-        if sequence_number > self.order_update_number[instrument]: 
-            self.calculate_vwap(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+        if sequence_number > self.order_update_number[instrument]:
+            self.calculate_vwap(instrument, ask_prices,
+                                ask_volumes, bid_prices, bid_volumes)
+            self.calculate_resist(instrument)
+            self.calculate_support(instrument)
+            self.calculate_regression(instrument)
+
+            if ask_prices[0] != 0:
+                self.ask_price[instrument] = ask_prices[0] 
+            if bid_prices[0] != 0:
+                self.bid_price[instrument] = bid_prices[0]
             self.order_update_number[instrument] = sequence_number
-        
-        self.calculate_resist(instrument)
-        self.calculate_support(instrument)
-        self.calculate_regression(instrument)
+
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
@@ -118,9 +146,12 @@ class AutoTrader(BaseAutoTrader):
         the number of lots filled at that price.
         """
         if client_order_id in self.bids:
-            self.position += volume
-        elif client_order_id in self.asks:
-            self.position -= volume
+            self.volume -= volume
+            self.position[self.bids.get(client_order_id)] += volume
+        
+        if client_order_id in self.asks:
+            self.volume -= volume
+            self.position[self.asks.get(client_order_id)] -= volume
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -134,85 +165,76 @@ class AutoTrader(BaseAutoTrader):
         If an order is cancelled its remaining volume will be zero.
         """
         if remaining_volume == 0:
+            if client_order_id in self.bids:
+                self.bids.pop(client_order_id)
+            elif client_order_id in self.asks:
+                self.asks.pop(client_order_id)
+            
+            self.remove_order_id(client_order_id)
 
-            # It could be either a bid or an ask
-            self.bids.discard(client_order_id)
-            self.asks.discard(client_order_id)
+    def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
+                               ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
 
-    def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], 
-                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-      
-        if sequence_number > self.trade_update_number:
-            self.calculate_market_price(instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
-            #print(self.market_prices)
+        if sequence_number > self.trade_update_number[instrument] and (bid_prices[0] != 0 or ask_prices[0] != 0):
+            self.calculate_market_price(
+                instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+            self.trade_update_number[instrument] = sequence_number
 
-            #Calculate current and previous SMA
-            sma_20 = self.calculate_sma(20)
-            sma_100 = self.calculate_sma(100)
-            #print("SMA20",sma_20)
-            #print(sequence_number)
-            #print("SMA100",sma_100)
-            if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
-                #BUY
-                self.cancel_all_orders(Side.SELL)
-                self.cancel_all_orders(Side.BUY)
-                self.insert_order_buy(bid_prices[0],10)
+        if bid_prices[0] != 0 and self.support[instrument] <= bid_prices[0] <= self.support[instrument] * (1 + self.bound_range):
+            lot_size = 1
+            if self.slope[instrument] > 0 and self.r2[instrument] >= 0.1:
+                lot_size *= 2
 
+            self.insert_order_buy(bid_prices[0], lot_size, instrument)
 
-                #print("BUY")
-                
-            if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
-                #SELL
-                self.cancel_all_orders(Side.BUY)
-                self.cancel_all_orders(Side.SELL)
-                self.insert_order_sell(bid_prices[0],10)
+        if ask_prices[0] != 0 and self.resist[instrument] * (1 - self.bound_range) <= ask_prices[0] <= self.resist[instrument]:
+            lot_size = 1
+            if self.slope[instrument] < 0 and self.r2[instrument] >= 0.1:
+                lot_size *= 2
+            
+            self.insert_order_sell(ask_prices[0], lot_size, instrument)
 
-                #print("SELL")
-
-            self.sma_20_prev = sma_20
-            self.sma_100_prev = sma_100
-
-            self.trade_update_number = sequence_number
-    
-    def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int], 
-                                bid_prices: List[int], bid_volumes: List[int]) -> None:
+    def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int],
+                               bid_prices: List[int], bid_volumes: List[int]) -> None:
         total_volume = 0
         total_price = 0
         for i in range(UPDATE_LIST_SIZE):
             total_volume += bid_volumes[i] + ask_volumes[i]
-            total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
+            total_price += bid_volumes[i] * \
+                bid_prices[i] + ask_volumes[i] * ask_prices[i]
 
             average_price = total_price // total_volume
             self.market_prices[instrument].append(average_price)
 
     def calculate_vwap(self, instrument: int, ask_prices: List[int],
-                        ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+                       ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         bid_total_volume = 0
         bid_total_value = 0
 
         ask_total_volume = 0
         ask_total_value = 0
-        
+
         for i in range(UPDATE_LIST_SIZE):
             # VWAP from bid orders
             bid_total_volume += bid_volumes[i]
             bid_total_value += bid_volumes[i] * bid_prices[i]
 
-            #VWAP from ask orders
+            # VWAP from ask orders
             ask_total_volume += ask_volumes[i]
             ask_total_value += ask_volumes[i] * ask_prices[i]
-        
-        bid_vwap = math.floor(bid_total_value / bid_total_volume)
-        ask_vwap = math.ceil(ask_total_value / ask_total_volume)
-        
+
+        bid_vwap = math.floor(bid_total_value / bid_total_volume) if (bid_total_volume != 0) else  self.vwaps[instrument][0]
+        ask_vwap = math.ceil(ask_total_value / ask_total_volume)  if (ask_total_volume != 0) else  self.vwaps[instrument][1]
+
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
-        
+
     def calculate_sma(self, period: int):
-        tail = self.market_prices[1][-period:]#currently hardcoded for the ETF or something
-        
+        # currently hardcoded for the ETF or something
+        tail = self.market_prices[1][-period:]
+
         return mean(tail)
-    
+
     def cancel_all_orders(self, side: int):
         if side == Side.BUY:
             for order in self.bids:
@@ -222,52 +244,103 @@ class AutoTrader(BaseAutoTrader):
             for order in self.asks:
                 self.send_cancel_order(order)
             self.asks.clear()
-    
-    def insert_order_buy(self, price: int, amount: int):
+
+    def insert_order_buy(self, price: int, amount: int, instrument: int):
+        buy_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
+        if buy_amount <= 0 and self.position[0] + self.position[1] >= POSITION_LIMIT:
+            return
+        if len(self.active_orders) == 10:
+            print("Sell amount is: ", buy_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
+            print("-----------------------------")
+            self.free_order_space()
+            return
         bid_id = next(self.order_ids)
-        self.send_insert_order(bid_id, Side.BUY, price-100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
-        self.bids.add(bid_id)
+        self.send_insert_order(bid_id, Side.BUY, price - 100, buy_amount, Lifespan.GOOD_FOR_DAY)
+        self.volume += buy_amount
+        self.bids[bid_id] = instrument
+        self.active_orders.append([bid_id, price, Side.BUY, buy_amount])
+
+    def insert_order_sell(self, price: int, amount: int, instrument: int):
+        sell_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
+        if sell_amount <= 0 and abs(self.position[0] + self.position[1]) >= POSITION_LIMIT:
+            return
+        if len(self.active_orders) == 10:
+            print("Sell amount is: ", sell_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
+            print("-----------------------------")
+            self.free_order_space()
+            return
+        sell_id = next(self.order_ids)
+        self.send_insert_order(sell_id, Side.SELL, price + 100, sell_amount, Lifespan.GOOD_FOR_DAY)
+        self.volume += sell_amount
+        self.asks[sell_id] = instrument
+        self.active_orders.append([sell_id, price, Side.SELL, sell_amount])
+        # print(len(self.active_orders))
     
-    def insert_order_sell(self, price: int, amount: int):
-        bid_id = next(self.order_ids)
-        self.send_insert_order(bid_id, Side.SELL, price+100, LOT_SIZE*amount, Lifespan.GOOD_FOR_DAY)
-        self.asks.add(bid_id)
+    def free_order_space(self):
+        max_diff = 0
+        index = 0
+        for i in range(len(self.active_orders)):
+            order = self.active_orders[i]
+            order_id = order[0]
+            price = order[1]
+            trade_side = order[2]
+            
+            ref_price = self.bid_price[1] if (trade_side == Side.SELL) else self.ask_price[1]
+            curr_diff = abs(ref_price - price)
+            print("Order id is: ", order_id, "Order price is: $", price, "Diff is: ", curr_diff)
+            
+            if curr_diff > max_diff or (curr_diff == max_diff and order_id > self.active_orders[index][0]):
+                max_diff = curr_diff
+                index = i
+        
+        prev_length = len(self.active_orders)
+        #If there are no orders 
+        order = self.active_orders.pop(index)
+        print("Popped Order: ", order)  
+        assert(len(self.active_orders) + 1 == prev_length)
+        self.send_cancel_order(order[0])
+        self.volume -= order[3]
+    
+    def remove_order_id(self, order_id: int):
+        for i in range(len(self.active_orders)):
+                order = self.active_orders[i]
+                if order[0] == order_id:
+                    return self.active_orders.pop(i)
 
     def calculate_resist(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 500:
             return
-        
+
         prices = np.array(self.market_prices[instrument][-500:])
         midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
         peaks, _ = find_peaks(prices, height=midpoint)
-    
-        res: np.ndarray = prices[peaks]   
+
+        res: np.ndarray = prices[peaks]
         if res.size == 0:
             return
 
         self.resist[instrument] = res.sum() / res.size
-        
+
     def calculate_support(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 500:
             return
 
-        prices = np.array(self.market_prices[instrument][-500:])        
+        prices = np.array(self.market_prices[instrument][-500:])
         midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
         reverse_prices = (prices - midpoint) * -1
-        peaks, _ = find_peaks(reverse_prices, height = 0)
+        peaks, _ = find_peaks(reverse_prices, height=0)
         support: np.ndarray = prices[peaks]
         if support.size == 0:
             return
-        
+
         self.support[instrument] = support.sum() / support.size
 
     def calculate_regression(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 1000:
             return
-        
+
         prices = np.array(self.market_prices[instrument][-1000:])
         result = linregress(list(range(1000)), prices)
 
         self.slope[instrument] = result.slope
-        self.r2[instrument] = result.rvalue**2 
-        
+        self.r2[instrument] = result.rvalue**2
