@@ -110,6 +110,9 @@ class AutoTrader(BaseAutoTrader):
                             client_order_id, error_message.decode())
         if client_order_id != 0:
             self.on_order_status_message(client_order_id, 0, 0, 0)
+            removed = self.remove_order_id(client_order_id)
+            if removed:
+                self.volume -= removed[3]
 
     def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                      ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -166,12 +169,8 @@ class AutoTrader(BaseAutoTrader):
                 self.bids.pop(client_order_id)
             elif client_order_id in self.asks:
                 self.asks.pop(client_order_id)
-        
-            for i in range(len(self.active_orders)):
-                order = self.active_orders[i]
-                if order[0] == client_order_id:
-                    self.active_orders.pop(i)
-                    break
+            
+            self.remove_order_id(client_order_id)
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -224,8 +223,8 @@ class AutoTrader(BaseAutoTrader):
             ask_total_volume += ask_volumes[i]
             ask_total_value += ask_volumes[i] * ask_prices[i]
 
-        bid_vwap = math.floor(bid_total_value / bid_total_volume)
-        ask_vwap = math.ceil(ask_total_value / ask_total_volume)
+        bid_vwap = math.floor(bid_total_value / bid_total_volume) if (bid_total_volume != 0) else  self.vwaps[instrument][0]
+        ask_vwap = math.ceil(ask_total_value / ask_total_volume)  if (ask_total_volume != 0) else  self.vwaps[instrument][1]
 
         self.vwaps[instrument][0] = bid_vwap
         self.vwaps[instrument][1] = ask_vwap
@@ -249,6 +248,8 @@ class AutoTrader(BaseAutoTrader):
     def insert_order_buy(self, price: int, amount: int, instrument: int):
         buy_amount = min(VOLUME_LIMIT - self.volume, min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1])))
         if len(self.active_orders) == 10 or buy_amount == 0:
+            print("Sell amount is: ", buy_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
+            print("-----------------------------")
             self.free_order_space()
             return
         bid_id = next(self.order_ids)
@@ -261,11 +262,13 @@ class AutoTrader(BaseAutoTrader):
     def insert_order_sell(self, price: int, amount: int, instrument: int):
         sell_amount = min(VOLUME_LIMIT - self.volume, min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1])))
         if len(self.active_orders) == 10 or sell_amount == 0:
+            print("Sell amount is: ", sell_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
+            print("-----------------------------")
             self.free_order_space()
             return
         sell_id = next(self.order_ids)
         self.send_insert_order(sell_id, Side.SELL, price + 100, sell_amount, Lifespan.GOOD_FOR_DAY)
-        self.volume = self.volume + sell_amount
+        self.volume += sell_amount
         self.asks[sell_id] = instrument
         self.active_orders.append([sell_id, price, Side.SELL, sell_amount])
         # print(len(self.active_orders))
@@ -281,7 +284,7 @@ class AutoTrader(BaseAutoTrader):
             
             ref_price = self.bid_price[1] if (trade_side == Side.SELL) else self.ask_price[1]
             curr_diff = abs(ref_price - price)
-            print("Order price is: ", price, "Diff is: ", curr_diff)
+            print("Order id is: ", order_id, "Order price is: $", price, "Diff is: ", curr_diff)
             
             if curr_diff > max_diff or (curr_diff == max_diff and order_id > self.active_orders[index][0]):
                 max_diff = curr_diff
@@ -293,6 +296,12 @@ class AutoTrader(BaseAutoTrader):
         assert(len(self.active_orders) + 1 == prev_length)
         self.send_cancel_order(order[0])
         self.volume -= order[3]
+    
+    def remove_order_id(self, order_id: int):
+        for i in range(len(self.active_orders)):
+                order = self.active_orders[i]
+                if order[0] == order_id:
+                    return self.active_orders.pop(i)
 
     def calculate_resist(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 500:
