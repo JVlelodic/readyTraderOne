@@ -57,7 +57,7 @@ class AutoTrader(BaseAutoTrader):
         # List of orders structured as [order_id, price, trade_side, volume]
         self.active_orders = [] 
 
-        # Range from support and resistance lines
+        # Range from support and resistance s
         self.bound_range = 0.001
 
         # Current positions
@@ -246,8 +246,10 @@ class AutoTrader(BaseAutoTrader):
             self.asks.clear()
 
     def insert_order_buy(self, price: int, amount: int, instrument: int):
-        buy_amount = min(VOLUME_LIMIT - self.volume, min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1])))
-        if len(self.active_orders) == 10 or buy_amount == 0:
+        buy_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
+        if buy_amount <= 0 and self.position[0] + self.position[1] >= POSITION_LIMIT:
+            return
+        if len(self.active_orders) == 10:
             print("Sell amount is: ", buy_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
             print("-----------------------------")
             self.free_order_space()
@@ -257,11 +259,12 @@ class AutoTrader(BaseAutoTrader):
         self.volume += buy_amount
         self.bids[bid_id] = instrument
         self.active_orders.append([bid_id, price, Side.BUY, buy_amount])
-        # print(len(self.active_orders))
 
     def insert_order_sell(self, price: int, amount: int, instrument: int):
-        sell_amount = min(VOLUME_LIMIT - self.volume, min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1])))
-        if len(self.active_orders) == 10 or sell_amount == 0:
+        sell_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
+        if sell_amount <= 0 and abs(self.position[0] + self.position[1]) >= POSITION_LIMIT:
+            return
+        if len(self.active_orders) == 10:
             print("Sell amount is: ", sell_amount, " Current volume is: ", self.volume, " Position is: ", self.position)
             print("-----------------------------")
             self.free_order_space()
@@ -291,6 +294,7 @@ class AutoTrader(BaseAutoTrader):
                 index = i
         
         prev_length = len(self.active_orders)
+        #If there are no orders 
         order = self.active_orders.pop(index)
         print("Popped Order: ", order)  
         assert(len(self.active_orders) + 1 == prev_length)
