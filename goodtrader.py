@@ -21,6 +21,8 @@ import math
 import pandas as pd
 import heapq
 
+import matplotlib.pyplot as plt
+
 from struct import error
 import numpy as np
 from scipy.signal import find_peaks
@@ -89,6 +91,8 @@ class AutoTrader(BaseAutoTrader):
         # Variables used for SMA BUY SELL strategy
         self.sma_20_prev = 0
         self.sma_100_prev = 0
+        self.sma_list = []
+
 
         # orderbook for short and long position
         self.position_constitution = []
@@ -131,6 +135,7 @@ class AutoTrader(BaseAutoTrader):
         """
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
+
             self.calculate_vwap(instrument, ask_prices,
                                 ask_volumes, bid_prices, bid_volumes)
             self.calculate_resist(instrument)
@@ -141,37 +146,28 @@ class AutoTrader(BaseAutoTrader):
                 self.ask_price[instrument] = ask_prices[0] 
             if bid_prices[0] != 0:
                 self.bid_price[instrument] = bid_prices[0]
+            
             self.order_update_number[instrument] = sequence_number
 
-            sma_20 = self.calculate_sma(50)
-            sma_100 = self.calculate_sma(200)
+            sma_20 = self.calculate_sma(20)
+            sma_50 = self.calculate_sma(50)
+            sma_100 = self.calculate_sma(100)
+            sma_200 = self.calculate_sma(200)
+            sma_500 = self.calculate_sma(500)
+            self.sma_list.append([self.event_loop.time(),sma_20,sma_50,sma_100,sma_200,sma_500])
+            df = pd.DataFrame(self.sma_list,columns=['Time','SMA-20','SMA-50','SMA-100','SMA-200','SMA-500'])
+            #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
+            #print(self.sma_list)
+            df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/sma_10.csv")
+            #plt.savefig("/home/posocer/Documents/projects/trader/readyTraderOne/file.jpg")
+            
+            self.sma_20_prev = sma_20
+            self.sma_100_prev = sma_100
+            #print(self.sma_list)
             #print("SMA20",sma_20)
             #print(sequence_number)
             #print("SMA100",sma_100)
             #print(ask_prices,bid_prices)
-            if self.sma_20_prev < sma_20 and sma_20 >= sma_100:
-                #BUY
-                if self.position < 800:
-                    self.cancel_all_orders(Side.SELL)
-                    #self.cancel_all_orders(Side.BUY)
-                    if len(self.bids) < 3:
-                        self.insert_order_buy(bid_prices[0],5)
-
-
-                #print("BUY")
-                
-            if self.sma_20_prev > sma_20 and sma_20 <= sma_100:
-                #SELL
-                if self.position > -800:
-                    self.cancel_all_orders(Side.BUY)
-                    #self.cancel_all_orders(Side.SELL)
-                    if len(self.asks) < 3:
-                        self.insert_order_sell(ask_prices[0],5)
-
-                #print("SELL")
-
-            self.sma_20_prev = sma_20
-            self.sma_100_prev = sma_100
         
         self.calculate_resist(instrument)
         self.calculate_support(instrument)
@@ -189,12 +185,10 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id in self.bids:
             self.volume -= volume
             self.position[self.bids.get(client_order_id)] += volume
-            self.bid_price = price
         
         if client_order_id in self.asks:
             self.volume -= volume
             self.position[self.asks.get(client_order_id)] -= volume
-            self.ask_price = price
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:

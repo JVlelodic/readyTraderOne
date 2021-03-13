@@ -66,6 +66,7 @@ class CompetitorAccount(object):
         max_price: int = future_price + delta
         clamped: int = min_price if etf_price < min_price else max_price if etf_price > max_price else etf_price
         self.profit_or_loss = self.account_balance + self.future_position * future_price + self.etf_position * clamped
+        #print("is this zero", self.future_position * future_price + self.etf_position * clamped)
         if self.profit_or_loss > self.max_profit:
             self.max_profit = self.profit_or_loss
         if self.max_profit - self.profit_or_loss > self.max_drawdown:

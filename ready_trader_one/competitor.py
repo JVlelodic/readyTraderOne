@@ -219,6 +219,7 @@ class Competitor(ICompetitor, IOrderListener):
     def on_timer_tick(self, now: float, future_price: int, etf_price: int) -> None:
         """Called on each timer tick to update the auto-trader."""
         self.account.update(future_price or 0, etf_price or 0)
+        #print("hi there, ", self.name,"position", self.account.future_position,"price", future_price)
         self.score_board.tick(now, self.name, self.account, etf_price, future_price)
 
     def send_error(self, now: float, client_order_id: int, message: bytes) -> None:
