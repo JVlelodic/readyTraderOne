@@ -181,8 +181,6 @@ class AutoTrader(BaseAutoTrader):
 
         #currently we do not account for market orders as we do not do them
         self.order_book.amend_order(volume,client_order_id)
-        #print("Whats in here",self.order_book.asks,self.order_book.bids)
-        #self.logger.info("Calling on_order_filled_message volume: %d client_order_id: %d", volume, client_order_id)
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -195,15 +193,6 @@ class AutoTrader(BaseAutoTrader):
 
         If an order is cancelled its remaining volume will be zero.
         """
-        #self.logger.info("Calling on_order_status_message fill volume: %d, remaining_volume: %d, client_order_id: %d", fill_volume, remaining_volume, client_order_id)
-
-        # if remaining_volume == 0:
-        #     if client_order_id in self.bids:
-        #         self.bids.pop(client_order_id)
-        #     elif client_order_id in self.asks:
-        #         self.asks.pop(client_order_id)
-            
-        #     self.remove_order_id(client_order_id)
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -267,16 +256,6 @@ class AutoTrader(BaseAutoTrader):
 
         return mean(tail)
 
-    # def cancel_all_orders(self, side: int):
-    #     if side == Side.BUY:
-    #         for order in self.bids:
-    #             self.send_cancel_order(order)
-    #         self.bids.clear()
-    #     elif side == Side.SELL:
-    #         for order in self.asks:
-    #             self.send_cancel_order(order)
-    #         self.asks.clear()
-
     def insert_order_buy(self, price: int, amount: int, instrument: int):
         buy_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
         if buy_amount <= 0 and self.position[0] + self.position[1] >= POSITION_LIMIT:
@@ -286,72 +265,29 @@ class AutoTrader(BaseAutoTrader):
             print("-----------------------------")
             order_id = self.order_book.remove_least_useful_order(Side.BUY)
             self.send_cancel_order(order_id)
-            #self.logger.info("Cancelling bid order because too many. Order id is: %d",order_id)
             return
         bid_id = next(self.order_ids)
-
-        #self.logger.info("Inserting bid order volume: %d client_order_id: %d", buy_amount, bid_id)
 
         self.order_book.add_bid(price-100,buy_amount,bid_id)
         if(buy_amount != 0):
             self.send_insert_order(bid_id, Side.BUY, price - 100, buy_amount, Lifespan.GOOD_FOR_DAY)
-        #self.bids[bid_id] = instrument
-        #self.active_orders.append([bid_id, price, Side.BUY, buy_amount])
 
     def insert_order_sell(self, price: int, amount: int, instrument: int):
         sell_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
         if sell_amount <= 0 and abs(self.position[0] + self.position[1]) >= POSITION_LIMIT:
             return
-        #print("Number of orders", self.order_book.num_orders)
         if self.order_book.num_orders == ORDER_LIMIT:
             print("Sell amount is: ", sell_amount, " Current volume is: ", self.order_book.volume, " Position is: ", self.order_book.position)
             print("-----------------------------")
             order_id = self.order_book.remove_least_useful_order(Side.SELL)
             self.send_cancel_order(order_id)
-            #self.logger.info("Cancelling ask order because too many. Order id is: %d",order_id)
             return
 
         sell_id = next(self.order_ids)
 
-        #self.logger.info("Inserting ask order volume: %d client_order_id: %d", sell_amount, sell_id)
-
         self.order_book.add_ask(price+100,sell_amount,sell_id)
         if(sell_amount != 0):
             self.send_insert_order(sell_id, Side.SELL, price + 100, sell_amount, Lifespan.GOOD_FOR_DAY)
-        #self.asks[sell_id] = instrument
-        #self.active_orders.append([sell_id, price, Side.SELL, sell_amount])
-        # print(len(self.active_orders))
-    
-    # def free_order_space(self):
-    #     max_diff = 0
-    #     index = 0
-    #     for i in range(len(self.active_orders)):
-    #         order = self.active_orders[i]
-    #         order_id = order[0]
-    #         price = order[1]
-    #         trade_side = order[2]
-            
-    #         ref_price = self.bid_price[1] if (trade_side == Side.SELL) else self.ask_price[1]
-    #         curr_diff = abs(ref_price - price)
-    #         print("Order id is: ", order_id, "Order price is: $", price, "Diff is: ", curr_diff)
-            
-    #         if curr_diff > max_diff or (curr_diff == max_diff and order_id > self.active_orders[index][0]):
-    #             max_diff = curr_diff
-    #             index = i
-        
-    #     prev_length = len(self.active_orders)
-    #     #If there are no orders 
-    #     order = self.active_orders.pop(index)
-    #     print("Popped Order: ", order)  
-    #     assert(len(self.active_orders) + 1 == prev_length)
-    #     self.send_cancel_order(order[0])
-    #     self.volume -= order[3]
-    
-    # def remove_order_id(self, order_id: int):
-    #     for i in range(len(self.active_orders)):
-    #             order = self.active_orders[i]
-    #             if order[0] == order_id:
-    #                 return self.active_orders.pop(i)
 
     def calculate_resist(self, instrument: int) -> None:
         if len(self.market_prices[instrument]) < 500:
@@ -472,17 +408,14 @@ class OrderBook():
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
-        #print("Current position: ",self.position, "PLUS ORDERS: ", self.position_after_orders)
         for bid in self.bids:
             if bid[2] == order_id:
                 self.position_after_orders += vol
                 self.volume -= vol
                 self.position += vol
                 if bid[1]-vol == 0:
-                    #print("removing bid order")
                     self.bids.remove(bid)
                     self.num_orders -= 1
-                    #print("Number of orders: ", self.num_orders)
                 else:
                     bid[1] -= vol
                 return
@@ -493,10 +426,8 @@ class OrderBook():
                 self.volume -= vol
                 self.position -= vol
                 if ask[1]-vol == 0:
-                    #print("removing ask order")
                     self.asks.remove(ask)
                     self.num_orders -= 1
-                    #print("Number of orders: ", self.num_orders)
                 else:
                     ask[1] -= vol
                 return
@@ -525,7 +456,7 @@ class OrderBook():
         
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
-        if(side == Side.BUY): #this pop possibly broke
+        if(side == Side.BUY):
             #If not empty
             if self.bids:
                 order = self.bids.pop(0)
@@ -543,5 +474,4 @@ class OrderBook():
         
         self.volume -= order[1]
         self.num_orders -= 1
-        #print("Number of orders: ", self.num_orders)
         return order[2]     
