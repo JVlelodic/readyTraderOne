@@ -165,13 +165,22 @@ class AutoTrader(BaseAutoTrader):
             bid_id = next(self.order_ids)
             price = bid_prices[0] - 100 
             order = self.order_book.add_bid(price, lot_size, bid_id)
-            
+            can = True
+            #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
             if not order[0]:
-                remove_id = self.order_book.remove_least_useful_order(Side.BUY)
-                self.send_cancel_order(remove_id)
-                order = self.order_book.add_bid(price, lot_size, bid_id)
-            
-            self.send_insert_order(bid_id, Side.BUY, price, order[1], Lifespan.LIMIT_ORDER)
+                #If too many orders we can remove one and see if it works
+                if self.order_book.num_orders == ORDER_LIMIT:
+                    remove_id = self.order_book.remove_least_useful_order(Side.BUY)
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_bid(price, lot_size, bid_id)
+                    if not order[0]:
+                        can = False
+                #Volume exceed just dont do anything
+                else:
+                    can = False
+                
+            if can:
+                self.send_insert_order(bid_id, Side.BUY, price, order[1], Lifespan.LIMIT_ORDER)
             
 
         if ask_prices[0] != 0 and self.resist * (1 - self.bound_range) <= ask_prices[0] <= self.resist:
@@ -182,13 +191,20 @@ class AutoTrader(BaseAutoTrader):
             ask_id = next(self.order_ids)
             price = ask_prices[0] + 100 
             order = self.order_book.add_ask(price, lot_size, ask_id)
-            
+            can = True
+            #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
             if not order[0]:
-                remove_id = self.order_book.remove_least_useful_order(Side.SELL)
-                self.send_cancel_order(remove_id)
-                order = self.order_book.add_ask(price, lot_size, ask_id)
-            
-            self.send_insert_order(ask_id, Side.SELL, price, order[1], Lifespan.LIMIT_ORDER)
+                if self.order_book.num_orders == ORDER_LIMIT:
+                    remove_id = self.order_book.remove_least_useful_order(Side.SELL)
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_ask(price, lot_size, ask_id)
+                    if not order[0]:
+                        can = False
+                #Volume exceed just dont do anything
+                else:
+                    can = False
+            if can:
+                self.send_insert_order(ask_id, Side.SELL, price, order[1], Lifespan.LIMIT_ORDER)
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int]) -> None:
 
@@ -305,15 +321,20 @@ class OrderBook():
         #bids and ask list will be sorted lowest to highest price
         self.asks = []
         self.bids = []
+
+        self.vol_asks = 0
+        self.vol_bids = 0
     
     def add_bid(self, price: int, vol: int, order_id: int):
         """
         vol is updated with a value which is legal to be put into the exchange
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
+        #currently we are not implementing a hard 1000 position limit properly
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders) + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - self.position_after_orders)
+            if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
             if vol <= 0:
                 return [False, 0]
         
@@ -329,6 +350,7 @@ class OrderBook():
             self.position_after_orders += vol
             self.volume += vol
             self.num_orders += 1
+            self.vol_bids += vol
             return [True, vol]
         return [False, 0]
 
@@ -336,9 +358,11 @@ class OrderBook():
         """
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
+        #currently we are not implementing a hard 1000 position limit properly
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders) + vol  > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position_after_orders))
+            if vol + self.volume > VOLUME_LIMIT or abs(self.position) + self.vol_asks + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks) 
             if vol <= 0:
                 return [False, 0]
 
@@ -354,6 +378,7 @@ class OrderBook():
             self.position_after_orders -= vol
             self.volume += vol
             self.num_orders += 1
+            self.vol_asks += vol
             return [True, vol]
         return [False, 0]
 
@@ -361,11 +386,13 @@ class OrderBook():
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         for i in range(len(self.bids)):
             bid = self.bids[i]
             if bid[2] == order_id:
                 self.volume -= vol
                 self.position += vol
+                self.vol_bids -= vol
                 if bid[1]-vol == 0:
                     self.bids.pop(i)
                     self.num_orders -= 1
@@ -378,6 +405,7 @@ class OrderBook():
             if ask[2] == order_id:
                 self.volume -= vol
                 self.position -= vol
+                self.vol_asks -= vol
                 if ask[1]-vol == 0:
                     self.asks.pop(i)
                     self.num_orders -= 1
@@ -394,6 +422,7 @@ class OrderBook():
                 self.num_orders -= 1
                 self.position_after_orders -= bid[1]
                 self.volume -= bid[1]
+                self.vol_bids -= bid[1]
                 self.bids.pop(i)
                 return
         
@@ -403,6 +432,7 @@ class OrderBook():
                 self.num_orders -= 1
                 self.position_after_orders += ask[1]
                 self.volume -= ask[1]
+                self.vol_asks -= ask[1]
                 self.asks.pop(i)
                 return
 
@@ -413,21 +443,27 @@ class OrderBook():
         
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if(side == Side.BUY): #this pop possibly broke
+            
             #If not empty
             if self.bids:
                 order = self.bids.pop(0)
                 self.position_after_orders -= order[1]
+                self.vol_bids -= order[1]
             elif self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
+                self.vol_asks -= order[1]
         else:
             if self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
+                self.vol_asks -= order[1]
             elif self.bids:
                 order = self.bids.pop(0)   
                 self.position_after_orders -= order[1]
+                self.vol_bids -= order[1]
         
         self.volume -= order[1]
         self.num_orders -= 1
