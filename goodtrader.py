@@ -160,17 +160,35 @@ class AutoTrader(BaseAutoTrader):
 
         if bid_prices[0] != 0 and self.support <= bid_prices[0] <= self.support * (1 + self.bound_range):
             lot_size = 50
-            if self.slope[instrument] > 0 and self.r2[instrument] >= 0.1:
+            if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
-            order = self.order_book.add_ask(bid_prices[0] - 100, lot_size, order)
-            self.insert_order_buy(bid_prices[0], lot_size, instrument)
+            bid_id = next(self.order_ids)
+            price = bid_prices[0] - 100 
+            order = self.order_book.add_bid(price, lot_size, bid_id)
+            
+            if not order[0]:
+                remove_id = self.order_book.remove_least_useful_order(Side.BUY)
+                self.send_cancel_order(remove_id)
+                order = self.order_book.add_bid(price, lot_size, bid_id)
+            
+            self.send_insert_order(bid_id, Side.BUY, price, order[1], Lifespan.LIMIT_ORDER)
+            
 
-        if ask_prices[0] != 0 and self.resist[instrument] * (1 - self.bound_range) <= ask_prices[0] <= self.resist[instrument]:
-            lot_size = 1
-            if self.slope[instrument] < 0 and self.r2[instrument] >= 0.1:
+        if ask_prices[0] != 0 and self.resist * (1 - self.bound_range) <= ask_prices[0] <= self.resist:
+            lot_size = 50
+            if self.slope < 0 and self.r2 >= 0.1:
                 lot_size *= 2
             
-            self.insert_order_sell(ask_prices[0], lot_size, instrument)
+            ask_id = next(self.order_ids)
+            price = ask_prices[0] + 100 
+            order = self.order_book.add_ask(price, lot_size, ask_id)
+            
+            if not order[0]:
+                remove_id = self.order_book.remove_least_useful_order(Side.SELL)
+                self.send_cancel_order(remove_id)
+                order = self.order_book.add_ask(price, lot_size, ask_id)
+            
+            self.send_insert_order(ask_id, Side.SELL, price, order[1], Lifespan.LIMIT_ORDER)
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int]) -> None:
 
@@ -179,7 +197,7 @@ class AutoTrader(BaseAutoTrader):
             self.future_market_price.append(last_traded)
         else:
             #Instrument is ETF
-            last_future_price = self.future_market_price[-1]
+            last_future_price = self.future_market_price[-1] if len(self.future_market_price) > 0 else last_traded
             etf_price = round(max(last_future_price * 0.998, min(last_future_price * 1.002, last_traded)))
             self.etf_market_price.append(etf_price)
         
@@ -288,7 +306,7 @@ class OrderBook():
         self.asks = []
         self.bids = []
     
-    def add_bid(self, price: int, vol: int, order_id: int) -> List[bool, int]:
+    def add_bid(self, price: int, vol: int, order_id: int):
         """
         vol is updated with a value which is legal to be put into the exchange
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
