@@ -312,7 +312,7 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or self.position_after_orders + vol > POSITION_LIMIT:
+            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders) + vol > POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - self.position_after_orders)
             if vol <= 0:
                 return [False, 0]
@@ -337,7 +337,7 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders - vol) > POSITION_LIMIT:
+            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders) + vol  > POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position_after_orders))
             if vol <= 0:
                 return [False, 0]
@@ -369,7 +369,6 @@ class OrderBook():
                 if bid[1]-vol == 0:
                     self.bids.pop(i)
                     self.num_orders -= 1
-                    break
                 else:
                     bid[1] -= vol
                 return
@@ -382,7 +381,6 @@ class OrderBook():
                 if ask[1]-vol == 0:
                     self.asks.pop(i)
                     self.num_orders -= 1
-                    break
                 else:
                     ask[1] -= vol
                 return
