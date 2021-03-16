@@ -29,7 +29,7 @@ from scipy.signal import find_peaks
 from scipy.stats import linregress
 
 from statistics import mean
-from typing import List
+from typing import List, Dict
 
 from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
 
@@ -57,23 +57,8 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1)
         self.order_book = OrderBook()
         
-        # List of orders structured as [order_id, price, trade_side, volume]
-        self.active_orders = [] 
-
         # Range from support and resistance s
         self.bound_range = 0.001
-
-        # Current positions
-        self.position = [0,0]
-
-        # Current volume for ETF
-        self.volume = 0
-
-        # Ask prices
-        self.ask_price = [0, 0]
-
-        # Bid prices
-        self.bid_price = [0, 0]
 
         # Current sequence number to update on order_book_updates function
         self.order_update_number = [1, 1]
@@ -81,11 +66,18 @@ class AutoTrader(BaseAutoTrader):
         # Current sequence number to update the on_trade_ticks functiondxs  
         self.trade_update_number = [1,1]
 
-        # List of bid/ask VWAPs for instruments, where list[i] is the bid/ask VWAP for instrument i
-        self.vwaps = [[None, None], [None, None]]
-
-        # List of market prices for instruments, where list[i] contains list of market prices for instrument i
-        self.market_prices = [[], []]
+        # Current bid/ask for etf
+        self.bid = 0
+        self.ask = 0
+        
+        self.bid_vwap = 0
+        self.ask_vwap = 0
+        
+        # List of market price for futures
+        self.future_market_price = []
+        
+        # List of market price for ETF
+        self.etf_market_price = []
 
         # Variables used for SMA BUY SELL strategy
         self.sma_20_prev = 0
@@ -98,16 +90,16 @@ class AutoTrader(BaseAutoTrader):
         heapq.heapify(self.position_constitution)
 
         # Most recent resistance line value
-        self.resist = [0, 0]
+        self.resist = 0
 
         # Most recent support line value
-        self.support = [0, 0]
+        self.support = 0
 
         # Gradient of recent trend
-        self.slope = [0, 0]
+        self.slope = 0
 
         # R2 Coefficient
-        self.r2 = [0, 0]
+        self.r2 = 0
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -131,17 +123,16 @@ class AutoTrader(BaseAutoTrader):
         """
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
+            if instrument == Instrument.ETF:
+                self.calculate_vwap(ask_prices, ask_volumes, bid_prices, bid_volumes)
+                self.calculate_resist()
+                self.calculate_support()
+                self.calculate_regression()
 
-            self.calculate_vwap(instrument, ask_prices,
-                                ask_volumes, bid_prices, bid_volumes)
-            self.calculate_resist(instrument)
-            self.calculate_support(instrument)
-            self.calculate_regression(instrument)
-
-            if ask_prices[0] != 0:
-                self.ask_price[instrument] = ask_prices[0] 
-            if bid_prices[0] != 0:
-                self.bid_price[instrument] = bid_prices[0]
+                if ask_prices[0] != 0:
+                    self.ask = ask_prices[0] 
+                if bid_prices[0] != 0:
+                    self.bid = bid_prices[0]
             
             self.order_update_number[instrument] = sequence_number
 
@@ -182,8 +173,8 @@ class AutoTrader(BaseAutoTrader):
         #currently we do not account for market orders as we do not do them
         self.order_book.amend_order(volume,client_order_id)
 
-    def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
-                                fees: int) -> None:
+    # def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
+    #                             fees: int) -> None:
         """Called when the status of one of your orders changes.
 
         The fill_volume is the number of lots already traded, remaining_volume
@@ -197,38 +188,96 @@ class AutoTrader(BaseAutoTrader):
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
 
-        if sequence_number > self.trade_update_number[instrument] and (bid_prices[0] != 0 or ask_prices[0] != 0):
-            self.calculate_market_price(
-                instrument, ask_prices, ask_volumes, bid_prices, bid_volumes)
+        if sequence_number > self.trade_update_number[instrument]:
+            self.calculate_market_price(instrument, ask_prices, bid_prices)
             self.trade_update_number[instrument] = sequence_number
 
-        if bid_prices[0] != 0 and self.support[instrument] <= bid_prices[0] <= self.support[instrument] * (1 + self.bound_range):
-            lot_size = 1
-            if self.slope[instrument] > 0 and self.r2[instrument] >= 0.1:
+        if bid_prices[0] != 0 and self.support <= bid_prices[0] <= self.support * (1 + self.bound_range):
+            lot_size = 50
+            if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
-            self.insert_order_buy(bid_prices[0], lot_size, instrument)
+            bid_id = next(self.order_ids)
+            price = bid_prices[0] - 100 
+            order = self.order_book.add_bid(price, lot_size, bid_id)
+            can = True
+            #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
+            if not order[0]:
+                #If too many orders we can remove one and see if it works
+                if self.order_book.num_orders == ORDER_LIMIT:
+                    remove_id = self.order_book.remove_least_useful_order(Side.BUY)
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_bid(price, lot_size, bid_id)
+                    if not order[0]:
+                        can = False
+                #Volume exceed just dont do anything
+                else:
+                    can = False
+                
+            if can:
+                self.send_insert_order(bid_id, Side.BUY, price, order[1], Lifespan.LIMIT_ORDER)
+            
 
-        if ask_prices[0] != 0 and self.resist[instrument] * (1 - self.bound_range) <= ask_prices[0] <= self.resist[instrument]:
-            lot_size = 1
-            if self.slope[instrument] < 0 and self.r2[instrument] >= 0.1:
+        if ask_prices[0] != 0 and self.resist * (1 - self.bound_range) <= ask_prices[0] <= self.resist:
+            lot_size = 50
+            if self.slope < 0 and self.r2 >= 0.1:
                 lot_size *= 2
             
-            self.insert_order_sell(ask_prices[0], lot_size, instrument)
+            ask_id = next(self.order_ids)
+            price = ask_prices[0] + 100 
+            order = self.order_book.add_ask(price, lot_size, ask_id)
+            can = True
+            #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
+            if not order[0]:
+                if self.order_book.num_orders == ORDER_LIMIT:
+                    remove_id = self.order_book.remove_least_useful_order(Side.SELL)
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_ask(price, lot_size, ask_id)
+                    if not order[0]:
+                        can = False
+                #Volume exceed just dont do anything
+                else:
+                    can = False
+            if can:
+                self.send_insert_order(ask_id, Side.SELL, price, order[1], Lifespan.LIMIT_ORDER)
 
-    def calculate_market_price(self, instrument: int, ask_prices: List[int], ask_volumes: List[int],
-                               bid_prices: List[int], bid_volumes: List[int]) -> None:
-        total_volume = 0
-        total_price = 0
-        for i in range(UPDATE_LIST_SIZE):
-            total_volume += bid_volumes[i] + ask_volumes[i]
-            total_price += bid_volumes[i] * \
-                bid_prices[i] + ask_volumes[i] * ask_prices[i]
+    def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int]) -> None:
 
-            average_price = total_price // total_volume
-            self.market_prices[instrument].append(average_price)
+        last_traded = self.get_last_traded_price(ask_prices, bid_prices)
+        if instrument == Instrument.FUTURE:
+            self.future_market_price.append(last_traded)
+        else:
+            #Instrument is ETF
+            last_future_price = self.future_market_price[-1] if len(self.future_market_price) > 0 else last_traded
+            etf_price = round(max(last_future_price * 0.998, min(last_future_price * 1.002, last_traded)))
+            self.etf_market_price.append(etf_price)
+        
+    def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int])-> int:
+        last_price = 0
+        if ask_prices[0] != 0 and bid_prices[0] != 0:
+                if ask_prices[0] > bid_prices[0]:
+                    last_price = round((ask_prices[0] + bid_prices[0]) / 2.0)
+                else:
+                    #Take the bid price
+                    last_price = bid_prices[0]
+        else:
+            # Find latest bid 
+            if ask_prices[0] == 0:
+                for bids in bid_prices:
+                    last_price = bids if bids != 0 else last_price
+            # Find latest ask
+            else:
+                for asks in ask_prices:
+                    last_price = asks if asks != 0 else last_price
+                
+        return last_price
+    
+    def calculate_sma(self, period: int):
+        # currently hardcoded for the ETF or something
+        tail = self.market_prices[1][-period:]
 
-    def calculate_vwap(self, instrument: int, ask_prices: List[int],
-                       ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+        return mean(tail)
+    
+    def calculate_vwap(self, ask_prices: List[int], ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         bid_total_volume = 0
         bid_total_value = 0
 
@@ -244,88 +293,46 @@ class AutoTrader(BaseAutoTrader):
             ask_total_volume += ask_volumes[i]
             ask_total_value += ask_volumes[i] * ask_prices[i]
 
-        bid_vwap = math.floor(bid_total_value / bid_total_volume) if (bid_total_volume != 0) else  self.vwaps[instrument][0]
-        ask_vwap = math.ceil(ask_total_value / ask_total_volume)  if (ask_total_volume != 0) else  self.vwaps[instrument][1]
-
-        self.vwaps[instrument][0] = bid_vwap
-        self.vwaps[instrument][1] = ask_vwap
-
-    def calculate_sma(self, period: int):
-        # currently hardcoded for the ETF or something
-        tail = self.market_prices[1][-period:]
-
-        return mean(tail)
-
-    def insert_order_buy(self, price: int, amount: int, instrument: int):
-        buy_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
-        if buy_amount <= 0 and self.position[0] + self.position[1] >= POSITION_LIMIT:
-            return
-        if self.order_book.num_orders == ORDER_LIMIT:
-            print("Buy amount is: ", buy_amount, " Current volume is: ", self.order_book.volume, " Position is: ", self.order_book.position)
-            print("-----------------------------")
-            order_id = self.order_book.remove_least_useful_order(Side.BUY)
-            self.send_cancel_order(order_id)
-            return
-        bid_id = next(self.order_ids)
-
-        self.order_book.add_bid(price-100,buy_amount,bid_id)
-        if(buy_amount != 0):
-            self.send_insert_order(bid_id, Side.BUY, price - 100, buy_amount, Lifespan.GOOD_FOR_DAY)
-
-    def insert_order_sell(self, price: int, amount: int, instrument: int):
-        sell_amount = min(LOT_SIZE*amount, POSITION_LIMIT - abs(self.position[0]) - abs(self.position[1]))
-        if sell_amount <= 0 and abs(self.position[0] + self.position[1]) >= POSITION_LIMIT:
-            return
-        if self.order_book.num_orders == ORDER_LIMIT:
-            print("Sell amount is: ", sell_amount, " Current volume is: ", self.order_book.volume, " Position is: ", self.order_book.position)
-            print("-----------------------------")
-            order_id = self.order_book.remove_least_useful_order(Side.SELL)
-            self.send_cancel_order(order_id)
+        self.bid_vwap = round(bid_total_value / bid_total_volume) if (bid_total_volume != 0) else self.bid_vwap
+        self.ask_vwap = round(ask_total_value / ask_total_volume)  if (ask_total_volume != 0) else self.ask_vwap
+        
+    def calculate_resist(self) -> None:
+        if len(self.etf_market_price) < 250:
             return
 
-        sell_id = next(self.order_ids)
-
-        self.order_book.add_ask(price+100,sell_amount,sell_id)
-        if(sell_amount != 0):
-            self.send_insert_order(sell_id, Side.SELL, price + 100, sell_amount, Lifespan.GOOD_FOR_DAY)
-
-    def calculate_resist(self, instrument: int) -> None:
-        if len(self.market_prices[instrument]) < 500:
-            return
-
-        prices = np.array(self.market_prices[instrument][-500:])
-        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        prices = np.array(self.etf_market_price[-250:])
+        midpoint = (self.bid_vwap + self.ask_vwap) / 2
         peaks, _ = find_peaks(prices, height=midpoint)
 
         res: np.ndarray = prices[peaks]
         if res.size == 0:
             return
 
-        self.resist[instrument] = res.sum() / res.size
+        self.resist = res.sum() / res.size
 
-    def calculate_support(self, instrument: int) -> None:
-        if len(self.market_prices[instrument]) < 500:
+    def calculate_support(self) -> None:
+        if len(self.etf_market_price) < 250:
             return
 
-        prices = np.array(self.market_prices[instrument][-500:])
-        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        prices = np.array(self.etf_market_price[-250:])
+        midpoint = (self.bid_vwap + self.ask_vwap) / 2
         reverse_prices = (prices - midpoint) * -1
         peaks, _ = find_peaks(reverse_prices, height=0)
         support: np.ndarray = prices[peaks]
         if support.size == 0:
             return
 
-        self.support[instrument] = support.sum() / support.size
+        self.support = support.sum() / support.size
 
-    def calculate_regression(self, instrument: int) -> None:
-        if len(self.market_prices[instrument]) < 1000:
+    def calculate_regression(self) -> None:
+        if len(self.etf_market_price) < 500:
             return
 
-        prices = np.array(self.market_prices[instrument][-1000:])
-        result = linregress(list(range(1000)), prices)
+        prices = np.array(self.etf_market_price[-500:])
+        result = linregress(list(range(500)), prices)
 
-        self.slope[instrument] = result.slope
-        self.r2[instrument] = result.rvalue**2
+        self.slope = result.slope
+        self.r2 = result.rvalue**2
 
 class OrderBook():
     def __init__(self):
@@ -348,105 +355,119 @@ class OrderBook():
         #bids and ask list will be sorted lowest to highest price
         self.asks = []
         self.bids = []
+
+        self.vol_asks = 0
+        self.vol_bids = 0
     
     def add_bid(self, price: int, vol: int, order_id: int):
         """
         vol is updated with a value which is legal to be put into the exchange
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
+        #currently we are not implementing a hard 1000 position limit properly
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT:
-                vol = VOLUME_LIMIT - self.volume
+            if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
             if vol <= 0:
-                return
-            if not self.bids:
-                self.bids.append([price, vol, order_id])
-            else:
-                insert = False
-                for i in range(len(self.bids)):
-                    if(self.bids[i][0] >= price):
-                        self.bids.insert(i,[price,vol,order_id])
-                        insert = True
-                        break
-                if not insert:
-                    self.bids.append([price,vol,order_id])
+                return [False, 0]
+        
+            insert = False
+            for i in range(len(self.bids)):
+                if(self.bids[i][0] >= price):
+                    self.bids.insert(i,[price,vol,order_id])
+                    insert = True
+                    break
+            if not insert:
+                self.bids.append([price,vol,order_id])
 
             self.position_after_orders += vol
             self.volume += vol
             self.num_orders += 1
-        else:
-            vol = 0
+            self.vol_bids += vol
+            return [True, vol]
+        return [False, 0]
 
     def add_ask(self, price: int, vol: int, order_id: int):
         """
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
+        #currently we are not implementing a hard 1000 position limit properly
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT:
-                vol = VOLUME_LIMIT - self.volume
+            if vol + self.volume > VOLUME_LIMIT or abs(self.position) + self.vol_asks + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks) 
             if vol <= 0:
-                return 
-            if not self.asks:
-                self.asks.append([price, vol, order_id])
-            else:
-                insert = False
-                for i in range(len(self.asks)):
-                    if(self.asks[i][0] >= price):
-                        self.asks.insert(i,[price,vol,order_id])   
-                        insert = True
-                        break
-                if not insert:
-                    self.asks.append([price,vol,order_id])
+                return [False, 0]
+
+            insert = False
+            for i in range(len(self.asks)):
+                if(self.asks[i][0] >= price):
+                    self.asks.insert(i,[price,vol,order_id])   
+                    insert = True
+                    break
+            if not insert:
+                self.asks.append([price,vol,order_id])
 
             self.position_after_orders -= vol
             self.volume += vol
             self.num_orders += 1
-        else:
-            vol = 0
+            self.vol_asks += vol
+            return [True, vol]
+        return [False, 0]
 
     def amend_order(self, vol: int, order_id: int):
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
-        for bid in self.bids:
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        for i in range(len(self.bids)):
+            bid = self.bids[i]
             if bid[2] == order_id:
-                self.position_after_orders += vol
                 self.volume -= vol
                 self.position += vol
+                self.vol_bids -= vol
                 if bid[1]-vol == 0:
-                    self.bids.remove(bid)
+                    self.bids.pop(i)
                     self.num_orders -= 1
                 else:
                     bid[1] -= vol
                 return
         
-        for ask in self.asks:
+        for i in range(len(self.asks)):
+            ask = self.asks[i]
             if ask[2] == order_id:
-                self.position_after_orders -= vol
                 self.volume -= vol
                 self.position -= vol
+                self.vol_asks -= vol
                 if ask[1]-vol == 0:
-                    self.asks.remove(ask)
+                    self.asks.pop(i)
                     self.num_orders -= 1
                 else:
                     ask[1] -= vol
                 return
+    
+    # HAVENT ACCOUNTED FOR CASE WHERE WE REMOVE AN ORDER AND OUR SELF.POSITION_AFTER_ORDERS goes over -+ 1000
 
     def remove_order(self, order_id: int):
-        for bid in self.bids:
+        for i in range(len(self.bids)):
+            bid =  self.bids[i]
             if bid[2] == order_id:
                 self.num_orders -= 1
                 self.position_after_orders -= bid[1]
                 self.volume -= bid[1]
-                self.bids.remove(bid)
+                self.vol_bids -= bid[1]
+                self.bids.pop(i)
                 return
         
-        for ask in self.asks:
+        for i in range(len(self.asks)):
+            ask = self.asks[i]
             if ask[2] == order_id:
                 self.num_orders -= 1
                 self.position_after_orders += ask[1]
                 self.volume -= ask[1]
-                self.asks.remove(ask)
+                self.vol_asks -= ask[1]
+                self.asks.pop(i)
                 return
 
     def remove_least_useful_order(self, side: int):
@@ -456,21 +477,27 @@ class OrderBook():
         
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
-        if(side == Side.BUY):
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        if(side == Side.BUY): #this pop possibly broke
+            
             #If not empty
             if self.bids:
                 order = self.bids.pop(0)
                 self.position_after_orders -= order[1]
+                self.vol_bids -= order[1]
             elif self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
+                self.vol_asks -= order[1]
         else:
             if self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
+                self.vol_asks -= order[1]
             elif self.bids:
                 order = self.bids.pop(0)   
                 self.position_after_orders -= order[1]
+                self.vol_bids -= order[1]
         
         self.volume -= order[1]
         self.num_orders -= 1
