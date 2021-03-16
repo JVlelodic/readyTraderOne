@@ -17,8 +17,7 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
-import math
-import pandas as pd
+# import pandas as pd
 from struct import error
 import numpy as np
 from scipy.signal import find_peaks
@@ -114,9 +113,10 @@ class AutoTrader(BaseAutoTrader):
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
-                self.calculate_resist(instrument)
-                self.calculate_support(instrument)
-                self.calculate_regression(instrument)
+                self.calculate_vwap(ask_prices, ask_volumes, bid_prices, bid_volumes)
+                self.calculate_resist()
+                self.calculate_support()
+                self.calculate_regression()
 
                 if ask_prices[0] != 0:
                     self.ask = ask_prices[0] 
@@ -209,45 +209,62 @@ class AutoTrader(BaseAutoTrader):
 
         return mean(tail)
     
-    def calculate_vwap(self, bid_prices: List[int], ask_prices: List[int], bid_volumes: List[int], ask_volumes: List[int]):
+    def calculate_vwap(self, ask_prices: List[int], ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+        bid_total_volume = 0
+        bid_total_value = 0
 
-    def calculate_resist(self, instrument: int) -> None:
+        ask_total_volume = 0
+        ask_total_value = 0
+
+        for i in range(UPDATE_LIST_SIZE):
+            # VWAP from bid orders
+            bid_total_volume += bid_volumes[i]
+            bid_total_value += bid_volumes[i] * bid_prices[i]
+
+            # VWAP from ask orders
+            ask_total_volume += ask_volumes[i]
+            ask_total_value += ask_volumes[i] * ask_prices[i]
+
+        self.bid_vwap = round(bid_total_value / bid_total_volume) if (bid_total_volume != 0) else self.bid_vwap
+        self.ask_vwap = round(ask_total_value / ask_total_volume)  if (ask_total_volume != 0) else self.ask_vwap
+        
+    def calculate_resist(self) -> None:
         if len(self.etf_market_price) < 250:
             return
 
         prices = np.array(self.etf_market_price[-250:])
-        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        midpoint = (self.bid_vwap + self.ask_vwap) / 2
         peaks, _ = find_peaks(prices, height=midpoint)
 
         res: np.ndarray = prices[peaks]
         if res.size == 0:
             return
 
-        self.resist[instrument] = res.sum() / res.size
+        self.resist = res.sum() / res.size
 
-    def calculate_support(self, instrument: int) -> None:
-        if len(self.market_prices[instrument]) < 500:
+    def calculate_support(self) -> None:
+        if len(self.etf_market_price) < 250:
             return
 
-        prices = np.array(self.market_prices[instrument][-500:])
-        midpoint = (self.vwaps[instrument][0] + self.vwaps[instrument][1]) / 2
+        prices = np.array(self.etf_market_price[-250:])
+        midpoint = (self.bid_vwap + self.ask_vwap) / 2
         reverse_prices = (prices - midpoint) * -1
         peaks, _ = find_peaks(reverse_prices, height=0)
         support: np.ndarray = prices[peaks]
         if support.size == 0:
             return
 
-        self.support[instrument] = support.sum() / support.size
+        self.support = support.sum() / support.size
 
-    def calculate_regression(self, instrument: int) -> None:
-        if len(self.market_prices[instrument]) < 1000:
+    def calculate_regression(self) -> None:
+        if len(self.etf_market_price) < 500:
             return
 
-        prices = np.array(self.market_prices[instrument][-1000:])
-        result = linregress(list(range(1000)), prices)
+        prices = np.array(self.etf_market_price[-500:])
+        result = linregress(list(range(500)), prices)
 
-        self.slope[instrument] = result.slope
-        self.r2[instrument] = result.rvalue**2
+        self.slope = result.slope
+        self.r2 = result.rvalue**2
 
 class OrderBook():
     def __init__(self):
