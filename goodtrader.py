@@ -420,20 +420,16 @@ class OrderBook():
             if self.bids:
                 order = self.bids.pop(0)
                 self.position_after_orders -= order[1]
-                self.volume -= order[1]
             elif self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
-                self.volume -= order[1]
         else:
             if self.asks:
                 order = self.asks.pop() #not specifying gives -1
                 self.position_after_orders += order[1]
-                self.volume -= order[1]
             elif self.bids:
                 order = self.bids.pop(0)   
                 self.position_after_orders -= order[1]
-                self.volume -= order[1]
         
         self.volume -= order[1]
         self.num_orders -= 1
