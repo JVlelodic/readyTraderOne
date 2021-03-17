@@ -171,7 +171,7 @@ class AutoTrader(BaseAutoTrader):
         """
 
         #currently we do not account for market orders as we do not do them
-        self.order_book.amend_order(volume,client_order_id)
+        self.order_book.amend_order(volume,client_order_id,price)
 
     # def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
     #                             fees: int) -> None:
@@ -344,7 +344,8 @@ class OrderBook():
 
         #volume of current orders on the market
         self.volume = 0
-
+        self.vol_asks = 0
+        self.vol_bids = 0
         #number of orders on market
         self.num_orders = 0
         
@@ -356,8 +357,7 @@ class OrderBook():
         self.asks = []
         self.bids = []
 
-        self.vol_asks = 0
-        self.vol_bids = 0
+        self.average_price = 0
     
     def add_bid(self, price: int, vol: int, order_id: int):
         """
@@ -416,7 +416,7 @@ class OrderBook():
             return [True, vol]
         return [False, 0]
 
-    def amend_order(self, vol: int, order_id: int):
+    def amend_order(self, vol: int, order_id: int, price: int):
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
@@ -424,9 +424,13 @@ class OrderBook():
         for i in range(len(self.bids)):
             bid = self.bids[i]
             if bid[2] == order_id:
+                if self.position + vol <= 0:
+                    self.average_price = (abs(self.position) * self.average_price + vol * price)
                 self.volume -= vol
                 self.position += vol
                 self.vol_bids -= vol
+
+
                 if bid[1]-vol == 0:
                     self.bids.pop(i)
                     self.num_orders -= 1
