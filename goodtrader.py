@@ -66,7 +66,7 @@ class AutoTrader(BaseAutoTrader):
         # Current sequence number to update the on_trade_ticks functiondxs  
         self.trade_update_number = [1,1]
 
-        # Current bid/ask for etf
+        # Current price we should put for ETF
         self.bid = 0
         self.ask = 0
         
@@ -128,11 +128,23 @@ class AutoTrader(BaseAutoTrader):
                 self.calculate_resist()
                 self.calculate_support()
                 self.calculate_regression()
-
-                if ask_prices[0] != 0:
-                    self.ask = ask_prices[0] 
-                if bid_prices[0] != 0:
+                volume_limit = 3000
+                if ask_volumes[0] >= volume_limit:
+                    self.ask = ask_prices[0]
+                elif ask_volumes[1] >= volume_limit and ask_prices[1] - ask_prices[0] >= 200 :
+                    self.ask = ask_prices[1] - 100
+                else:
+                    self.ask = ask_prices[0] + 100
+                # if ask_prices[0] != 0:
+                #     self.ask = ask_prices[0] 
+                if bid_volumes[0] >= volume_limit:
                     self.bid = bid_prices[0]
+                elif bid_volumes[1] >= volume_limit and bid_prices[0] - bid_prices[1] >= 200 :
+                    self.bid = bid_prices[1] + 100
+                else:
+                    self.bid = bid_prices[0] - 100
+                # if bid_prices[0] != 0:
+                #     self.bid = bid_prices[0]
             
             self.order_update_number[instrument] = sequence_number
 
@@ -187,7 +199,6 @@ class AutoTrader(BaseAutoTrader):
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
-
         if sequence_number > self.trade_update_number[instrument]:
             self.calculate_market_price(instrument, ask_prices, bid_prices)
             self.trade_update_number[instrument] = sequence_number
@@ -197,7 +208,7 @@ class AutoTrader(BaseAutoTrader):
             if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
             bid_id = next(self.order_ids)
-            price = bid_prices[0] - 100 
+            price = self.bid
             order = self.order_book.add_bid(price, lot_size, bid_id)
             can = True
             #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
@@ -223,7 +234,7 @@ class AutoTrader(BaseAutoTrader):
                 lot_size *= 2
             
             ask_id = next(self.order_ids)
-            price = ask_prices[0] + 100 
+            price = self.ask 
             order = self.order_book.add_ask(price, lot_size, ask_id)
             can = True
             #We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders. 
