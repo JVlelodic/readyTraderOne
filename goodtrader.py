@@ -137,15 +137,15 @@ class AutoTrader(BaseAutoTrader):
             self.order_update_number[instrument] = sequence_number
 
             sma_20 = self.calculate_sma(20)
-            sma_50 = self.calculate_sma(50)
-            sma_100 = self.calculate_sma(100)
+            #sma_50 = self.calculate_sma(50)
+            #sma_100 = self.calculate_sma(100)
             sma_200 = self.calculate_sma(200)
-            sma_500 = self.calculate_sma(500)
-            self.sma_list.append([self.event_loop.time(),sma_20,sma_50,sma_100,sma_200,sma_500])
-            df = pd.DataFrame(self.sma_list,columns=['Time','SMA-20','SMA-50','SMA-100','SMA-200','SMA-500'])
+            #sma_500 = self.calculate_sma(500)
+            #self.sma_list.append([self.event_loop.time(),sma_20,sma_50,sma_100,sma_200,sma_500])
+            #df = pd.DataFrame(self.sma_list,columns=['Time','SMA-20','SMA-50','SMA-100','SMA-200','SMA-500'])
             #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
             #print(self.sma_list)
-            df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/sma_10.csv")
+            #df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/sma_10.csv")
             #plt.savefig("/home/posocer/Documents/projects/trader/readyTraderOne/file.jpg")
             
             self.sma_20_prev = sma_20

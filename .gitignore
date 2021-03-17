@@ -156,3 +156,5 @@ dmypy.json
 
 ### Market data
 **/*.csv
+
+data_analysis.py
