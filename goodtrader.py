@@ -22,7 +22,6 @@ from struct import error
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.stats import linregress
-import matplotlib.pyplot as plt
 
 from statistics import mean
 from typing import List
@@ -56,14 +55,11 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1)
         self.order_book = OrderBook()
 
-<<<<<<< HEAD
         self.fig = plt.figure()
         
         # For rolling one second 50 order limit
         self.last_time_called = []
 
-=======
->>>>>>> removed prints
         # Range from support and resistance s
         self.bound_range = 0.001
 
@@ -179,27 +175,27 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-        print("Average price is: ", self.order_book.get_average_price())
+        print("Average price is: ", self.order_book.get_average_price(), " Ask: ", self.ask, " Bid: ", self.bid)
         if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
             (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
             print("Reached simple buy order")
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.support <= self.bid <= self.support * (1 + self.bound_range):
-            print("Reached complex buy order")
+            print("complex BUY order")
             lot_size = LOT_SIZE
             if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
-
+        
         if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
             (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
             print("Reached simple sell order")
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
-            print("Reached complex sell order")
+            print("complex SELL order")
             lot_size = LOT_SIZE
             if self.slope < 0 and self.r2 >= 0.1:
                 lot_size *= 2
@@ -549,7 +545,18 @@ class OrderBook():
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
-        # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        # is_bid: bool = False
+        # max_diff = 0
+        
+
+        # for i in range(len(self.bids)):
+        #     curr_diff = abs(last_price - self.bids[i])
+        #     if curr_diff > max_diff:
+        #         max_diff = curr_diff
+                
+        #         is_bid = True
+        #     if
+        #     max_diff = max(max_diff, abs(last_price - self.bids[i]))
         if(side == Side.BUY):  # this pop possibly broke
 
             # If not empty
@@ -573,7 +580,6 @@ class OrderBook():
 
         self.volume -= order[1]
         self.num_orders -= 1
-        #print("Number of orders: ", self.num_orders)
         return order[2]
 
     def calc_average_price(self, price: int, vol: int, side: Side):
