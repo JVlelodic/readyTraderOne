@@ -175,7 +175,7 @@ class AutoTrader(BaseAutoTrader):
         if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
             (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
             print("Reached simple buy order")
-            self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            self.send_buy_order(self.bid, min(abs(self.order_book.get_position()),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
         elif self.support <= self.bid <= self.support * (1 + self.bound_range):
             print("Reached complex buy order")
             lot_size = LOT_SIZE
@@ -186,7 +186,7 @@ class AutoTrader(BaseAutoTrader):
         if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
             (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
             print("Reached simple sell order")
-            self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            self.send_sell_order(self.ask, min(self.order_book.get_position(),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
         elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
             print("Reached complex sell order")
             lot_size = LOT_SIZE
