@@ -38,6 +38,7 @@ TICK_SIZE_IN_CENTS = 100
 UPDATE_LIST_SIZE = 5
 ORDER_LIMIT = 10
 RES_SUP_LENGTH = 500
+SIMPLE_ORDER_RANGE = 200
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -180,7 +181,7 @@ class AutoTrader(BaseAutoTrader):
         
         print("Average price is: ", self.order_book.get_average_price())
         # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
-        if self.order_book.get_position() < 0 and self.order_book.get_average_price() - 300 > self.bid:
+        if self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid:
             print("Reached simple buy order")
             self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.support <= self.bid <= self.support * (1 + self.bound_range):
@@ -192,7 +193,7 @@ class AutoTrader(BaseAutoTrader):
         
         # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
         # print()
-        if self.order_book.get_position() > 0 and self.order_book.get_average_price() + 300 < self.ask:
+        if self.order_book.get_position() > 0 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask:
             print("Reached simple sell order")
             self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
@@ -246,7 +247,7 @@ class AutoTrader(BaseAutoTrader):
             
         if can:
             self.send_insert_order(id, Side.SELL, price, order[1], order_type)
-            self.track_bids.append([self.event_loop.time(), price])
+            self.track_asks.append([self.event_loop.time(), price])
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int], ask_volumes: List[int], bid_volumes: List[int]) -> None:
 
@@ -263,11 +264,13 @@ class AutoTrader(BaseAutoTrader):
             total_price = 0
             for i in range(UPDATE_LIST_SIZE):
                 total_volume += bid_volumes[i] + ask_volumes[i]
-                total_price += bid_volumes[i] * \
-                    bid_prices[i] + ask_volumes[i] * ask_prices[i]
+                total_price += bid_volumes[i] * bid_prices[i] + ask_volumes[i] * ask_prices[i]
 
-                average_price = total_price // total_volume
+            average_price = total_price // total_volume if total_volume != 0 else 0
+            if(average_price != 0):
                 self.etf_market_price.append(average_price)
+                self.track_market_price.append([self.event_loop.time(), average_price])
+                
         
     def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int])-> int:
         last_price = 0
@@ -361,17 +364,6 @@ class AutoTrader(BaseAutoTrader):
         df1.to_csv("ask.csv")
         df2.to_csv("bid.csv")
         df3.to_csv("market.csv")
-        # df.plot(x='Time', y= ['Market Price', 'Asks', 'Bids'])
-        # max_len_vals = range(max_len)
-        # plt.plot(max_len_vals, self.etf_market_price[-max_len:], label = "market price", color = "orange")
-        # plt.plot(max_len_vals, self.order_book.track_asks[:max_len], label = "asks", color = "red")
-        # plt.plot(max_len_vals, self.order_book.track_bids[:max_len], label = "bids", color = "blue")
-        # # plt.plot(list(range(len(self.future_market_price))), self.future_market_price)
-        # # plt.legend(loc="upper left")
-        # # plt.show(block=False)
-        # self.fig.canvas.draw()
-        # image = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-        # image = image.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
 
 class OrderBook():
     def __init__(self):
@@ -407,8 +399,8 @@ class OrderBook():
         #currently we are not implementing a hard 1000 position limit properly
         # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or self.position_after_orders + self.vol_bids + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position_after_orders) - self.vol_bids)
+            if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
             if vol <= 0:
                 return [False, 0]
         
@@ -435,8 +427,8 @@ class OrderBook():
         #currently we are not implementing a hard 1000 position limit properly
         # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or abs(self.position_after_orders) + self.vol_asks + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position_after_orders) - self.vol_asks) 
+            if vol + self.volume > VOLUME_LIMIT or abs(self.position) + self.vol_asks + vol > POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks) 
             if vol <= 0:
                 return [False, 0]
 
