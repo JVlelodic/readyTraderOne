@@ -419,7 +419,6 @@ class OrderBook():
 
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
-<<<<<<< HEAD
 
         print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
@@ -433,15 +432,6 @@ class OrderBook():
                 vol = VOLUME_LIMIT - self.volume
             if self.position + self.vol_bids + vol > POSITION_LIMIT:
                 vol = POSITION_LIMIT - self.position - self.vol_bids
-=======
-        #currently we are not implementing a hard 1000 position limit properly
-        if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
-            if vol <= 0:
-                return [False, 0]
-
->>>>>>> removed prints
             insert = False
             for i in range(len(self.bids)):
                 if(self.bids[i][0] >= price):
@@ -470,7 +460,6 @@ class OrderBook():
         """
         #currently we are not implementing a hard 1000 position limit properly
         if self.num_orders < ORDER_LIMIT:
-<<<<<<< HEAD
             if self.volume == VOLUME_LIMIT:
                 return [False, 1]
             if self.position == -POSITION_LIMIT:
@@ -481,12 +470,6 @@ class OrderBook():
                 vol = VOLUME_LIMIT - self.volume
             if -self.position + self.vol_asks + vol > POSITION_LIMIT:
                 vol = POSITION_LIMIT - abs(self.position) - self.vol_asks
-=======
-            if vol + self.volume > VOLUME_LIMIT or self.position - self.vol_asks - vol < -POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks)
-            if vol <= 0:
-                return [False, 0]
->>>>>>> removed prints
 
             insert = False
             for i in range(len(self.asks)):
