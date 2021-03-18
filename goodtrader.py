@@ -427,8 +427,8 @@ class OrderBook():
         #currently we are not implementing a hard 1000 position limit properly
         print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or abs(self.position) + self.vol_asks + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks) 
+            if vol + self.volume > VOLUME_LIMIT or self.position - self.vol_asks - vol < -POSITION_LIMIT:
+                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks)
                 print("volume changed")
             if vol <= 0:
                 return [False, 0]
