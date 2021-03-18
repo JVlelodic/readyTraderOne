@@ -17,7 +17,6 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
-from tmptrader import RES_SUP_LENGTH
 import pandas as pd
 from struct import error
 import numpy as np
@@ -397,10 +396,11 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         #currently we are not implementing a hard 1000 position limit properly
-        # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
             if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
+                print("volume changed")
             if vol <= 0:
                 return [False, 0]
         
@@ -425,10 +425,11 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         #currently we are not implementing a hard 1000 position limit properly
-        # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
             if vol + self.volume > VOLUME_LIMIT or abs(self.position) + self.vol_asks + vol > POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks) 
+                print("volume changed")
             if vol <= 0:
                 return [False, 0]
 
@@ -452,7 +453,7 @@ class OrderBook():
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
-        # print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         for i in range(len(self.bids)):
             bid = self.bids[i]
             if bid[2] == order_id:
