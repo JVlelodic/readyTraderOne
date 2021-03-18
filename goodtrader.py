@@ -56,8 +56,6 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1)
         self.order_book = OrderBook()
 
-        self.fig = plt.figure()
-
         # Range from support and resistance s
         self.bound_range = 0.001
 
@@ -95,11 +93,6 @@ class AutoTrader(BaseAutoTrader):
 
         # R2 Coefficient
         self.r2 = 0
-
-        # DELETE
-        self.track_asks = []
-        self.track_bids = []
-        self.track_market_price = []
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -148,8 +141,7 @@ class AutoTrader(BaseAutoTrader):
                 #     self.bid = bid_prices[0]
 
             self.order_update_number[instrument] = sequence_number
-        self.plot_graph()
-
+            
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when when of your orders is filled, partially or fully.
 
@@ -159,8 +151,6 @@ class AutoTrader(BaseAutoTrader):
         """
         # currently we do not account for market orders as we do not do them
         self.order_book.amend_order(volume, client_order_id)
-        #print("Whats in here",self.order_book.asks,self.order_book.bids)
-        #self.logger.info("Calling on_order_filled_message volume: %d client_order_id: %d", volume, client_order_id)
 
     # def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
     #                             fees: int) -> None:
@@ -182,7 +172,6 @@ class AutoTrader(BaseAutoTrader):
             self.trade_update_number[instrument] = sequence_number
 
         print("Average price is: ", self.order_book.get_average_price())
-        # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
         if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
             (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
             print("Reached simple buy order")
@@ -194,8 +183,6 @@ class AutoTrader(BaseAutoTrader):
                 lot_size *= 2
             self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
 
-        # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
-        # print()
         if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
             (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
             print("Reached simple sell order")
@@ -230,7 +217,6 @@ class AutoTrader(BaseAutoTrader):
 
         if can:
             self.send_insert_order(id, Side.BUY, price, order[1], order_type)
-            self.track_bids.append([self.event_loop.time(), price])
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
         id = next(self.order_ids)
@@ -252,7 +238,6 @@ class AutoTrader(BaseAutoTrader):
 
         if can:
             self.send_insert_order(id, Side.SELL, price, order[1], order_type)
-            self.track_asks.append([self.event_loop.time(), price])
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int], ask_volumes: List[int], bid_volumes: List[int]) -> None:
 
@@ -275,8 +260,6 @@ class AutoTrader(BaseAutoTrader):
             average_price = total_price // total_volume if total_volume != 0 else 0
             if(average_price != 0):
                 self.etf_market_price.append(average_price)
-                self.track_market_price.append(
-                    [self.event_loop.time(), average_price])
 
     def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int]) -> int:
         last_price = 0
@@ -364,16 +347,6 @@ class AutoTrader(BaseAutoTrader):
         self.slope = result.slope
         self.r2 = result.rvalue**2
 
-    def plot_graph(self):
-        df1 = pd.DataFrame(self.track_asks, columns=["Time", "Ask"])
-        df2 = pd.DataFrame(self.track_bids, columns=["Time", "Bids"])
-        df3 = pd.DataFrame(self.track_market_price, columns=["Time", "Market"])
-
-        df1.to_csv("ask.csv")
-        df2.to_csv("bid.csv")
-        df3.to_csv("market.csv")
-
-
 class OrderBook():
     def __init__(self):
         # actual position
@@ -406,11 +379,9 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         #currently we are not implementing a hard 1000 position limit properly
-        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
             if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
-                print("volume changed")
             if vol <= 0:
                 return [False, 0]
 
@@ -435,11 +406,9 @@ class OrderBook():
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         #currently we are not implementing a hard 1000 position limit properly
-        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
             if vol + self.volume > VOLUME_LIMIT or self.position - self.vol_asks - vol < -POSITION_LIMIT:
                 vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks)
-                print("volume changed")
             if vol <= 0:
                 return [False, 0]
 
@@ -463,7 +432,6 @@ class OrderBook():
         """reduces the volume of the order as it has been partially filled/filled, if volume reaches 0 order will be removed from orders
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO EXCHANGE"""
-        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         for i in range(len(self.bids)):
             bid = self.bids[i]
             if bid[2] == order_id:
@@ -585,8 +553,6 @@ class OrderBook():
                     self.total_buy_volume = 0
                     self.total_sell_volume = 0
                     self.average_price = 0
-        # print("Average_price is: ", self.average_price)
-        # print()
 
     def get_average_price(self):
         return self.average_price
