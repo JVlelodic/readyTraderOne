@@ -84,8 +84,11 @@ class AutoTrader(BaseAutoTrader):
         self.etf_market_price = []
 
         # Variables used for SMA BUY SELL strategy
-        self.sma_20_prev = 0
-        self.sma_100_prev = 0
+        self.sma_50 = []
+        self.sma_200 = []
+        self.prev_sma_diff = 0
+        self.sma_intersections = []
+        self.sma_list = []
 
         # Most recent resistance line value
         self.resist = 0
@@ -127,6 +130,29 @@ class AutoTrader(BaseAutoTrader):
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
+                
+                sma_50 = self.calculate_sma(50)
+                sma_200 = self.calculate_sma(200)
+                sma_diff = sma_50 - sma_200
+                self.sma_50.append(sma_50)
+                self.sma_200.append(sma_200)
+                inter = False
+                if self.prev_sma_diff < 0:
+                    if sma_diff > 0:
+                        self.sma_intersections.append(self.event_loop.time())
+                        inter = True
+                elif self.prev_sma_diff > 0:
+                    if sma_diff < 0:
+                        self.sma_intersections.append(self.event_loop.time())
+                        inter = True
+                self.prev_sma_diff = sma_diff
+
+                self.sma_list.append([self.event_loop.time(),sma_50,sma_200,inter])
+                df = pd.DataFrame(self.sma_list,columns=['Time','SMA-50','SMA-200','Intersection'])
+                #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
+                #print(self.sma_list)
+                df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/plot.csv")
+
                 self.calculate_vwap(ask_prices, ask_volumes,
                                     bid_prices, bid_volumes)
                 self.calculate_resist()
@@ -219,7 +245,7 @@ class AutoTrader(BaseAutoTrader):
         print()
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
-        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period TIMELIMIT BUG doesn't like it in some scenarios need to fix
         time_limit = self.event_loop.time() - 1
 
         if self.last_time_called:
@@ -331,7 +357,7 @@ class AutoTrader(BaseAutoTrader):
 
     def calculate_sma(self, period: int):
         # currently hardcoded for the ETF or something
-        tail = self.market_prices[1][-period:]
+        tail = self.etf_market_price[-period:]
 
         return mean(tail)
 
