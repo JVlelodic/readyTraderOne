@@ -188,11 +188,9 @@ class AutoTrader(BaseAutoTrader):
 
             if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
                 (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
-                print("Reached simple buy order")
                 self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
                 self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
             elif self.support <= self.bid <= self.support * (1 + self.bound_range):
-                # print("complex BUY order")
                 lot_size = LOT_SIZE
                 if self.slope > 0 and self.r2 >= 0.1:
                     lot_size *= 2
@@ -201,33 +199,27 @@ class AutoTrader(BaseAutoTrader):
             
             if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
                 (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
-                print("Reached simple sell order")
                 self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
                 self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
             elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
-                # print("complex SELL order")
                 lot_size = LOT_SIZE
                 if self.slope < 0 and self.r2 >= 0.1:
                     lot_size *= 2
                 self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
                 self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
 
-        # print("Ask orders: ", self.order_book.asks)
-        # print("Buy orders: ", self.order_book.bids)
-        # print()
-
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
         #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
+        # time_limit = self.event_loop.time() - 1
 
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
+        # if self.last_time_called:
+        #     while self.last_time_called[0] < time_limit:
+        #         self.last_time_called.pop(0)
 
-        if (len(self.last_time_called) == 50):
-            return
-        else:
-            self.last_time_called.append(self.event_loop.time())
+        # if (len(self.last_time_called) == 50):
+        #     return
+        # else:
+        #     self.last_time_called.append(self.event_loop.time())
         
         id = next(self.order_ids)
         order = self.order_book.add_bid(price, lot_size, id)
@@ -235,7 +227,7 @@ class AutoTrader(BaseAutoTrader):
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
             if order[1] == 0: #need to change this to account for volume limits too
-                remove_id = self.order_book.remove_least_useful_order(Side.BUY)
+                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_bid(price, lot_size, id)
                 if not order[0]:
@@ -250,16 +242,16 @@ class AutoTrader(BaseAutoTrader):
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
         #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
+        # time_limit = self.event_loop.time() - 1
 
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
+        # if self.last_time_called:
+        #     while self.last_time_called[0] < time_limit:
+        #         self.last_time_called.pop(0)
 
-        if (len(self.last_time_called) == 50):
-            return
-        else:
-            self.last_time_called.append(self.event_loop.time())
+        # if (len(self.last_time_called) == 50):
+        #     return
+        # else:
+        #     self.last_time_called.append(self.event_loop.time())
 
         id = next(self.order_ids)
         order = self.order_book.add_ask(price, lot_size, id)
@@ -268,7 +260,7 @@ class AutoTrader(BaseAutoTrader):
         if not order[0]:
             # If too many orders we can remove one and see if it works
             if order[1] == 0: #need to change this to account for volume limits too
-                remove_id = self.order_book.remove_least_useful_order(Side.SELL)
+                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_ask(price, lot_size, id)
                 if not order[0]:
@@ -542,7 +534,8 @@ class OrderBook():
                 self.volume -= bid[1]
                 self.vol_bids -= bid[1]
                 self.bids.pop(i)
-                return
+                return 
+
 
         for i in range(len(self.asks)):
             ask = self.asks[i]
@@ -554,49 +547,35 @@ class OrderBook():
                 self.asks.pop(i)
                 return
 
-    def remove_least_useful_order(self, side: int):
+
+    def remove_least_useful_order(self, market_price: int):
         """removes the order on the side specified which is furthest away, in terms of price, from the current market price
 
         returns: order_id of order removed
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
-        # is_bid: bool = False
-        # max_diff = 0
+        max_diff = 0
+        order_id = 0
         
+        # bids and asks will be structured [price, vol, order_id]
 
-        # for i in range(len(self.bids)):
-        #     curr_diff = abs(last_price - self.bids[i])
-        #     if curr_diff > max_diff:
-        #         max_diff = curr_diff
-                
-        #         is_bid = True
-        #     if
-        #     max_diff = max(max_diff, abs(last_price - self.bids[i]))
-        if(side == Side.BUY):  # this pop possibly broke
-
-            # If not empty
-            if self.bids:
-                order = self.bids.pop(0)
-                self.position_after_orders -= order[1]
-                self.vol_bids -= order[1]
-            elif self.asks:
-                order = self.asks.pop()  # not specifying gives -1
-                self.position_after_orders += order[1]
-                self.vol_asks -= order[1]
-        else:
-            if self.asks:
-                order = self.asks.pop()  # not specifying gives -1
-                self.position_after_orders += order[1]
-                self.vol_asks -= order[1]
-            elif self.bids:
-                order = self.bids.pop(0)
-                self.position_after_orders -= order[1]
-                self.vol_bids -= order[1]
-
-        self.volume -= order[1]
-        self.num_orders -= 1
-        return order[2]
+        for i in range(len(self.bids)):
+            bid = self.bids[i]
+            curr_diff = abs(market_price - bid[0])
+            if curr_diff > max_diff or (curr_diff == max_diff and bid[2] > order_id):
+                max_diff = curr_diff
+                order_id  = bid[2]
+        
+        for i in range(len(self.asks)):
+            ask = self.asks[i]
+            curr_diff = abs(market_price - ask[0])
+            if curr_diff > max_diff or (curr_diff == max_diff and bid[2] > order_id):
+                max_diff = curr_diff
+                order_id = ask[2]
+        
+        self.remove_order(order_id)
+        return order_id
 
     def calc_average_price(self, price: int, vol: int, side: Side):
         if side == Side.BUY:
