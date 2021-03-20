@@ -24,7 +24,7 @@ from scipy.signal import find_peaks
 from scipy.stats import linregress
 
 from statistics import mean
-from typing import List
+from typing import List, Optional
 
 from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
 
@@ -98,6 +98,8 @@ class AutoTrader(BaseAutoTrader):
         # R2 Coefficient
         self.r2 = 0
 
+        self.pnl = []
+
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
 
@@ -118,6 +120,11 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
+        if len(self.future_market_price) > 0:
+            pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
+            print("Profit :", pnl)
+            self.pnl.append([self.event_loop.time(), pnl]) 
+        
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
@@ -170,19 +177,24 @@ class AutoTrader(BaseAutoTrader):
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
+
         if sequence_number > self.trade_update_number[instrument]:
             self.calculate_market_price(
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-        print("Average price is: ", self.order_book.get_average_price(), " Ask: ", self.ask, " Bid: ", self.bid)
         if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
             (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
+<<<<<<< HEAD
             print("Reached simple buy order")
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+=======
+            # print("simple BUY order")
+            self.send_buy_order(self.bid, min(abs(self.order_book.get_position()),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
+>>>>>>> testing pnl
         elif self.support <= self.bid <= self.support * (1 + self.bound_range):
-            print("complex BUY order")
+            # print("complex BUY order")
             lot_size = LOT_SIZE
             if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
@@ -191,20 +203,25 @@ class AutoTrader(BaseAutoTrader):
         
         if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
             (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
+<<<<<<< HEAD
             print("Reached simple sell order")
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+=======
+            # print("simple SELL order")
+            self.send_sell_order(self.ask, min(self.order_book.get_position(),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
+>>>>>>> testing pnl
         elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
-            print("complex SELL order")
+            # print("complex SELL order")
             lot_size = LOT_SIZE
             if self.slope < 0 and self.r2 >= 0.1:
                 lot_size *= 2
             self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
 
-        print("Ask orders: ", self.order_book.asks)
-        print("Buy orders: ", self.order_book.bids)
-        print()
+        # print("Ask orders: ", self.order_book.asks)
+        # print("Buy orders: ", self.order_book.bids)
+        # print()
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
         #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
@@ -273,9 +290,10 @@ class AutoTrader(BaseAutoTrader):
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int], ask_volumes: List[int], bid_volumes: List[int]) -> None:
 
-        last_traded = self.get_last_traded_price(ask_prices, bid_prices)
         if instrument == Instrument.FUTURE:
-            self.future_market_price.append(last_traded)
+            last_traded = self.get_last_traded_price(ask_prices, bid_prices)
+            if last_traded: 
+                self.future_market_price.append(last_traded)
         else:
             #Instrument is ETF
             # last_future_price = self.future_market_price[-1] if len(self.future_market_price) > 0 else last_traded
@@ -293,23 +311,16 @@ class AutoTrader(BaseAutoTrader):
             if(average_price != 0):
                 self.etf_market_price.append(average_price)
 
-    def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int]) -> int:
-        last_price = 0
+    def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int]) -> Optional[int]:
+        last_price = None
         if ask_prices[0] != 0 and bid_prices[0] != 0:
-            if ask_prices[0] > bid_prices[0]:
-                last_price = round((ask_prices[0] + bid_prices[0]) / 2.0)
-            else:
-                # Take the bid price
-                last_price = bid_prices[0]
+            last_price = round((ask_prices[0] + bid_prices[0]) / 2.0)
         else:
             # Find latest bid
-            if ask_prices[0] == 0:
-                for bids in bid_prices:
-                    last_price = bids if bids != 0 else last_price
-            # Find latest ask
-            else:
-                for asks in ask_prices:
-                    last_price = asks if asks != 0 else last_price
+            if ask_prices[0] != 0:
+                last_price = ask_prices[0]
+            elif bid_prices[0] != 0:
+                last_price = bid_prices[0]
 
         return last_price
 
@@ -404,6 +415,10 @@ class OrderBook():
         self.average_price = 0
         self.total_buy_volume = 0
         self.total_sell_volume = 0
+        
+        self.future_position = 0
+        self.last_buy = 0
+        self.last_sell = 0
 
     def add_bid(self, price: int, vol: int, order_id: int):
         """
@@ -493,6 +508,10 @@ class OrderBook():
                 self.calc_average_price(bid[0], vol, Side.BUY)
                 self.volume -= vol
                 self.position += vol
+                
+                self.future_position -= vol
+                self.last_buy = bid[0]
+
                 self.vol_bids -= vol
                 if bid[1]-vol == 0:
                     self.bids.pop(i)
@@ -507,6 +526,10 @@ class OrderBook():
                 self.calc_average_price(ask[0], vol, Side.SELL)
                 self.volume -= vol
                 self.position -= vol
+
+                self.future_position += vol
+                self.last_sell = ask[0]
+
                 self.vol_asks -= vol
                 if ask[1]-vol == 0:
                     self.asks.pop(i)
@@ -618,6 +641,16 @@ class OrderBook():
                     self.total_buy_volume = 0
                     self.total_sell_volume = 0
                     self.average_price = 0
+
+    def calc_profit_or_loss(self, future_price: int):
+        etf_price = self.average_price
+        delta: int = round(0.02 * future_price)
+        delta -= delta % 100
+        min_price: int = future_price - delta
+        max_price: int = future_price + delta
+        clamped: int = min_price if etf_price < min_price else max_price if etf_price > max_price else etf_price
+        profit_or_loss = self.future_position * future_price + self.position * clamped
+        return profit_or_loss
 
     def get_average_price(self):
         return self.average_price
