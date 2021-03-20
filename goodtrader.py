@@ -54,8 +54,6 @@ class AutoTrader(BaseAutoTrader):
         super().__init__(loop, team_name, secret)
         self.order_ids = itertools.count(1)
         self.order_book = OrderBook()
-
-        self.fig = plt.figure()
         
         # For rolling one second 50 order limit
         self.last_time_called = []
@@ -188,41 +186,31 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-        if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
-            (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
-<<<<<<< HEAD
-            print("Reached simple buy order")
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-=======
-            # print("simple BUY order")
-            self.send_buy_order(self.bid, min(abs(self.order_book.get_position()),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
->>>>>>> testing pnl
-        elif self.support <= self.bid <= self.support * (1 + self.bound_range):
-            # print("complex BUY order")
-            lot_size = LOT_SIZE
-            if self.slope > 0 and self.r2 >= 0.1:
-                lot_size *= 2
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
-        
-        if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
-            (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
-<<<<<<< HEAD
-            print("Reached simple sell order")
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-=======
-            # print("simple SELL order")
-            self.send_sell_order(self.ask, min(self.order_book.get_position(),VOLUME_LIMIT), Lifespan.GOOD_FOR_DAY)
->>>>>>> testing pnl
-        elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
-            # print("complex SELL order")
-            lot_size = LOT_SIZE
-            if self.slope < 0 and self.r2 >= 0.1:
-                lot_size *= 2
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
+            if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
+                (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
+                print("Reached simple buy order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.support <= self.bid <= self.support * (1 + self.bound_range):
+                # print("complex BUY order")
+                lot_size = LOT_SIZE
+                if self.slope > 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
+            
+            if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
+                (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
+                print("Reached simple sell order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
+                # print("complex SELL order")
+                lot_size = LOT_SIZE
+                if self.slope < 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
 
         # print("Ask orders: ", self.order_book.asks)
         # print("Buy orders: ", self.order_book.bids)
