@@ -17,6 +17,7 @@
 #     <https://www.gnu.org/licenses/>.
 import bisect
 import logging
+import pandas as pd
 
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -52,6 +53,8 @@ class Competitor(ICompetitor, IOrderListener):
         self.score_board: ScoreBoardWriter = score_board
         self.sell_prices: List[int] = list()
         self.tick_size: int = int(tick_size * 100.0)
+        #DELETE
+        self.pnl = []
 
     def disconnect(self, now: float) -> None:
         """Disconnect this competitor."""
@@ -132,7 +135,7 @@ class Competitor(ICompetitor, IOrderListener):
         self.match_events.hedge(now, self.name, order.client_order_id, Instrument.FUTURE, side, midpoint, volume)
         self.account.transact(Instrument.FUTURE, side, midpoint, volume, 0)
         self.account.update(last_traded, price)
-
+        
         if self.exec_connection is not None:
             self.exec_connection.send_order_filled(order.client_order_id, price, volume)
             self.exec_connection.send_order_status(order.client_order_id, order.volume - order.remaining_volume,
@@ -220,6 +223,9 @@ class Competitor(ICompetitor, IOrderListener):
         """Called on each timer tick to update the auto-trader."""
         self.account.update(future_price or 0, etf_price or 0)
         self.score_board.tick(now, self.name, self.account, etf_price, future_price)
+        self.pnl.append([self.score_board.event_loop.time(), self.account.profit_or_loss - self.account.account_balance])
+        df1 = pd.DataFrame(self.pnl, columns = ["Time", "Self PNL"])
+        df1.to_csv("market_profit.csv")
 
     def send_error(self, now: float, client_order_id: int, message: bytes) -> None:
         """Send an error message to the auto-trader and shut down the match."""

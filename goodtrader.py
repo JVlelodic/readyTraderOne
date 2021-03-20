@@ -77,7 +77,7 @@ class AutoTrader(BaseAutoTrader):
         self.ask_vwap = 0
 
         # List of market price for futures
-        self.future_market_price = []
+        self.future_market_price = [0]
 
         # List of market price for ETF
         self.etf_market_price = []
@@ -98,6 +98,7 @@ class AutoTrader(BaseAutoTrader):
         # R2 Coefficient
         self.r2 = 0
 
+        #DELETE
         self.pnl = []
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
@@ -120,10 +121,14 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        if len(self.future_market_price) > 0:
-            pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
-            print("Profit :", pnl)
-            self.pnl.append([self.event_loop.time(), pnl]) 
+
+        #Add 0 to list instead
+        
+        pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
+        #DELETE
+        self.pnl.append([self.event_loop.time(), pnl])
+        df1 = pd.DataFrame(self.pnl, columns = ["Time", "Self PNL"])
+        df1.to_csv("profit.csv")
         
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
@@ -643,7 +648,12 @@ class OrderBook():
                     self.average_price = 0
 
     def calc_profit_or_loss(self, future_price: int):
-        etf_price = self.average_price
+        if self.position == 0:
+            etf_price = 0
+        elif self.position > 0:
+            etf_price = self.last_buy
+        else:
+            etf_price = self.last_sell
         delta: int = round(0.02 * future_price)
         delta -= delta % 100
         min_price: int = future_price - delta
