@@ -57,6 +57,9 @@ class AutoTrader(BaseAutoTrader):
         self.order_book = OrderBook()
 
         self.fig = plt.figure()
+        
+        # For rolling one second 50 order limit
+        self.last_time_called = []
 
         # Range from support and resistance s
         self.bound_range = 0.001
@@ -186,12 +189,14 @@ class AutoTrader(BaseAutoTrader):
         if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
             (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
             print("Reached simple buy order")
+            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.support <= self.bid <= self.support * (1 + self.bound_range):
             print("Reached complex buy order")
             lot_size = LOT_SIZE
             if self.slope > 0 and self.r2 >= 0.1:
                 lot_size *= 2
+            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
 
         # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
@@ -199,12 +204,14 @@ class AutoTrader(BaseAutoTrader):
         if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
             (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
             print("Reached simple sell order")
+            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
         elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
             print("Reached complex sell order")
             lot_size = LOT_SIZE
             if self.slope < 0 and self.r2 >= 0.1:
                 lot_size *= 2
+            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
 
         print("Ask orders: ", self.order_book.asks)
@@ -212,13 +219,24 @@ class AutoTrader(BaseAutoTrader):
         print()
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
+        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        time_limit = self.event_loop.time() - 1
+
+        if self.last_time_called:
+            while self.last_time_called[0] < time_limit:
+                self.last_time_called.pop(0)
+
+        if (len(self.last_time_called) == 50):
+            return
+        else:
+            self.last_time_called.append(self.event_loop.time())
+        
         id = next(self.order_ids)
         order = self.order_book.add_bid(price, lot_size, id)
         can = True
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
-            # If too many orders we can remove one and see if it works
-            if self.order_book.num_orders == ORDER_LIMIT or self.order_book.volume == VOLUME_LIMIT:
+            if order[1] == 0: #need to change this to account for volume limits too
                 remove_id = self.order_book.remove_least_useful_order(Side.BUY)
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_bid(price, lot_size, id)
@@ -229,19 +247,31 @@ class AutoTrader(BaseAutoTrader):
                 can = False
 
         if can:
+            self.logger.info("Volume sent in is: %d",order[1])
             self.send_insert_order(id, Side.BUY, price, order[1], order_type)
             self.track_bids.append([self.event_loop.time(), price])
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
+        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        time_limit = self.event_loop.time() - 1
+
+        if self.last_time_called:
+            while self.last_time_called[0] < time_limit:
+                self.last_time_called.pop(0)
+
+        if (len(self.last_time_called) == 50):
+            return
+        else:
+            self.last_time_called.append(self.event_loop.time())
+
         id = next(self.order_ids)
         order = self.order_book.add_ask(price, lot_size, id)
         can = True
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
             # If too many orders we can remove one and see if it works
-            if self.order_book.num_orders == ORDER_LIMIT or self.order_book.volume == VOLUME_LIMIT:
-                remove_id = self.order_book.remove_least_useful_order(
-                    Side.SELL)
+            if order[1] == 0: #need to change this to account for volume limits too
+                remove_id = self.order_book.remove_least_useful_order(Side.SELL)
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_ask(price, lot_size, id)
                 if not order[0]:
@@ -251,6 +281,7 @@ class AutoTrader(BaseAutoTrader):
                 can = False
 
         if can:
+            self.logger.info("Volume sent in is: %d",order[1])
             self.send_insert_order(id, Side.SELL, price, order[1], order_type)
             self.track_asks.append([self.event_loop.time(), price])
 
@@ -403,17 +434,26 @@ class OrderBook():
     def add_bid(self, price: int, vol: int, order_id: int):
         """
         vol is updated with a value which is legal to be put into the exchange
+
+        Return: [Boolean, int] Boolean for whether it succeeded or not,if True int for volume OR reason for False if False
+
+        Codes: 0 for ORDER_LIMIT, 1 for VOLUME_LIMIT, 2 for POSITION_LIMIT, 3 for BIDS + POSITION_LIMIT
+
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
-        #currently we are not implementing a hard 1000 position limit properly
+
         print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or self.position + self.vol_bids + vol > POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_bids)
-                print("volume changed")
-            if vol <= 0:
-                return [False, 0]
-
+            if self.volume == VOLUME_LIMIT:
+                return [False, 1]
+            if self.position == POSITION_LIMIT:
+                return [False, 2]
+            if self.position + self.vol_bids == POSITION_LIMIT:
+                return [False, 3]
+            if vol + self.volume > VOLUME_LIMIT:
+                vol = VOLUME_LIMIT - self.volume
+            if self.position + self.vol_bids + vol > POSITION_LIMIT:
+                vol = POSITION_LIMIT - self.position - self.vol_bids
             insert = False
             for i in range(len(self.bids)):
                 if(self.bids[i][0] >= price):
@@ -432,16 +472,27 @@ class OrderBook():
 
     def add_ask(self, price: int, vol: int, order_id: int):
         """
+        vol is updated with a value which is legal to be put into the exchange
+
+        Return: [Boolean, int] Boolean for whether it succeeded or not,if True int for volume OR reason for False if False
+
+        Codes: 0 for ORDER_LIMIT, 1 for VOLUME_LIMIT, 2 for POSITION_LIMIT, 3 for ASKS + POSITION_LIMIT
+
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
         #currently we are not implementing a hard 1000 position limit properly
         print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
         if self.num_orders < ORDER_LIMIT:
-            if vol + self.volume > VOLUME_LIMIT or self.position - self.vol_asks - vol < -POSITION_LIMIT:
-                vol = min(VOLUME_LIMIT - self.volume, POSITION_LIMIT - abs(self.position) - self.vol_asks)
-                print("volume changed")
-            if vol <= 0:
-                return [False, 0]
+            if self.volume == VOLUME_LIMIT:
+                return [False, 1]
+            if self.position == -POSITION_LIMIT:
+                return [False, 2]
+            if -self.position + self.vol_asks == POSITION_LIMIT:
+                return [False, 3]
+            if vol + self.volume > VOLUME_LIMIT:
+                vol = VOLUME_LIMIT - self.volume
+            if -self.position + self.vol_asks + vol > POSITION_LIMIT:
+                vol = POSITION_LIMIT - abs(self.position) - self.vol_asks
 
             insert = False
             for i in range(len(self.asks)):
