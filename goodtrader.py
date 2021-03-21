@@ -29,7 +29,7 @@ from typing import List, Optional
 from ready_trader_one import BaseAutoTrader, Instrument, Lifespan, Side
 
 
-LOT_SIZE = 20
+LOT_SIZE = 40
 POSITION_LIMIT = 1000
 VOLUME_LIMIT = 200
 TICK_SIZE_IN_CENTS = 100
@@ -60,6 +60,7 @@ class AutoTrader(BaseAutoTrader):
 
         # Range from support and resistance s
         self.bound_range = 0.001
+        self.scale_factor = 1.2
 
         # Current sequence number to update on order_book_updates function
         self.order_update_number = [1, 1]
@@ -143,17 +144,35 @@ class AutoTrader(BaseAutoTrader):
                     self.ask = ask_prices[1] - 100
                 else:
                     self.ask = ask_prices[0] + 100
-                # if ask_prices[0] != 0:
-                #     self.ask = ask_prices[0]
                 if bid_volumes[0] >= volume_limit:
                     self.bid = bid_prices[0]
                 elif bid_volumes[1] >= volume_limit and bid_prices[0] - bid_prices[1] >= 200:
                     self.bid = bid_prices[1] + 100
                 else:
                     self.bid = bid_prices[0] - 100
-                # if bid_prices[0] != 0:
-                #     self.bid = bid_prices[0]
+            
+            pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
+            position = self.order_book.get_position()
+            if pnl != 0 and (pnl/100 >= abs(position) * self.scale_factor or pnl/100 >= 200):
+                print("Simple")
+                if position < 0:
+                    print("Price: ", self.bid)
+                    self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+                else:
+                    print("Price: ", self.ask)
+                    self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            else:
+                if self.r2 >= 0.1:
+                    if self.support <= self.bid <= self.support + 100 and self.slope > 0:
+                        print("Complex")
+                        print("Price: ", self.bid)
+                        self.send_buy_order(self.bid, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
 
+                    elif self.resist - 100 <= self.ask <= self.resist and self.slope < 0:
+                        print("Complex")
+                        print("Price: ", self.ask)
+                        self.send_sell_order(self.ask, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                print()
             self.order_update_number[instrument] = sequence_number
             
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
@@ -186,40 +205,20 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-            if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
-                (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-            elif self.support <= self.bid <= self.support * (1 + self.bound_range):
-                lot_size = LOT_SIZE
-                if self.slope > 0 and self.r2 >= 0.1:
-                    lot_size *= 2
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
-            
-            if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
-                (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-            elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist:
-                lot_size = LOT_SIZE
-                if self.slope < 0 and self.r2 >= 0.1:
-                    lot_size *= 2
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
+
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
-        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        # time_limit = self.event_loop.time() - 1
+        # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        time_limit = self.event_loop.time() - 1
 
-        # if self.last_time_called:
-        #     while self.last_time_called[0] < time_limit:
-        #         self.last_time_called.pop(0)
+        if self.last_time_called:
+            while self.last_time_called[0] < time_limit:
+                self.last_time_called.pop(0)
 
-        # if (len(self.last_time_called) == 50):
-        #     return
-        # else:
-        #     self.last_time_called.append(self.event_loop.time())
+        if (len(self.last_time_called) == 50):
+            return
+        else:
+            self.last_time_called.append(self.event_loop.time())
         
         id = next(self.order_ids)
         order = self.order_book.add_bid(price, lot_size, id)
@@ -241,17 +240,17 @@ class AutoTrader(BaseAutoTrader):
             self.send_insert_order(id, Side.BUY, price, order[1], order_type)
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
-        #Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        # time_limit = self.event_loop.time() - 1
+        # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        time_limit = self.event_loop.time() - 1
 
-        # if self.last_time_called:
-        #     while self.last_time_called[0] < time_limit:
-        #         self.last_time_called.pop(0)
+        if self.last_time_called:
+            while self.last_time_called[0] < time_limit:
+                self.last_time_called.pop(0)
 
-        # if (len(self.last_time_called) == 50):
-        #     return
-        # else:
-        #     self.last_time_called.append(self.event_loop.time())
+        if (len(self.last_time_called) == 50):
+            return
+        else:
+            self.last_time_called.append(self.event_loop.time())
 
         id = next(self.order_ids)
         order = self.order_book.add_ask(price, lot_size, id)
@@ -415,8 +414,7 @@ class OrderBook():
 
         FUNCTION DOES NOT SEND AN INSERT ORDER TO EXCHANGE
         """
-
-        print("my position is: ", self.position, "my after orders is: ", self.position_after_orders, "my volume is: ", self.volume, "my number is: ", self.num_orders)
+        
         if self.num_orders < ORDER_LIMIT:
             if self.volume == VOLUME_LIMIT:
                 return [False, 1]
@@ -555,8 +553,8 @@ class OrderBook():
 
         FUNCTION DOES NOT SEND A CANCEL ORDER TO THE EXCHANGE
         """
-        max_diff = 0
-        order_id = 0
+        max_diff = -1
+        order_id = -1
         
         # bids and asks will be structured [price, vol, order_id]
 
@@ -570,7 +568,7 @@ class OrderBook():
         for i in range(len(self.asks)):
             ask = self.asks[i]
             curr_diff = abs(market_price - ask[0])
-            if curr_diff > max_diff or (curr_diff == max_diff and bid[2] > order_id):
+            if curr_diff > max_diff or (curr_diff == max_diff and ask[2] > order_id):
                 max_diff = curr_diff
                 order_id = ask[2]
         
