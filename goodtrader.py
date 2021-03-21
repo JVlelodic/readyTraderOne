@@ -82,8 +82,17 @@ class AutoTrader(BaseAutoTrader):
         self.etf_market_price = []
 
         # Variables used for SMA BUY SELL strategy
-        self.sma_20_prev = 0
-        self.sma_100_prev = 0
+        self.sma_50 = []
+        self.sma_200 = []
+        self.prev_sma_diff = 0
+        self.sma_intersections = []
+        self.sma_list = []
+        self.prev_ema_26 = 0
+        self.prev_ema_50 = 0
+        self.prev_ema_200 = 0
+        self.macd = []
+        self.macd_flag = False
+        self.start_time = self.event_loop.time()
 
         # Most recent resistance line value
         self.resist = 0
@@ -132,6 +141,42 @@ class AutoTrader(BaseAutoTrader):
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
+                
+                sma_50 = self.calculate_sma(50)
+                sma_200 = self.calculate_sma(200)
+                sma_diff = sma_50 - sma_200
+                self.sma_50.append(sma_50)
+                self.sma_200.append(sma_200)
+                inter = False
+                if self.prev_sma_diff < 0:
+                    if sma_diff > 0:
+                        self.sma_intersections.append(self.event_loop.time())
+                        inter = True
+                elif self.prev_sma_diff > 0:
+                    if sma_diff < 0:
+                        self.sma_intersections.append(self.event_loop.time())
+                        inter = True
+                self.prev_sma_diff = sma_diff
+
+                ema_26 = self.calculate_ema(26,self.prev_ema_26)
+                ema_50 = self.calculate_ema(50,self.prev_ema_50)
+                ema_200 = self.calculate_ema(200,self.prev_ema_200)
+                macd = ema_200 - ema_50
+                self.macd.append(macd)
+                self.prev_ema_26 = ema_26
+                self.prev_ema_50 = ema_50
+                self.prev_ema_200 = ema_200
+                if self.event_loop.time() - 200 > self.start_time:
+                    if abs(self.macd) >= 90 and not self.macd:
+                        self.macd_flag = True
+                    elif abs(self.macd) <= 10 and self.macd:
+                        self.macd_flag = False
+                    self.sma_list.append([self.event_loop.time(),self.etf_market_price[-1],sma_50,sma_200,inter,ema_26,ema_50,ema_200,macd])
+                    df = pd.DataFrame(self.sma_list,columns=['Time','Market','SMA-50','SMA-200','Intersection','EMA-26','EMA-50','EMA-200','MACD'])
+                    #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
+                    #print(self.sma_list)
+                    #df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/example.csv")
+
                 self.calculate_vwap(ask_prices, ask_volumes,
                                     bid_prices, bid_volumes)
                 self.calculate_resist()
@@ -205,7 +250,44 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
+            print("Average price is: ", self.order_book.get_average_price())
+            if self.macd_flag:
+                if self.macd[-1] < 0:
+                    self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
+                else:
+                    self.send_sell_order(self.ask,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
+            # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
+            if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
+                (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
+                print("Reached simple buy order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.support <= self.bid <= self.support * (1 + self.bound_range) and not self.macd_flag:
+                print("Reached complex buy order")
+                lot_size = LOT_SIZE
+                if self.slope > 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
 
+            # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
+            # print()
+            if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
+                (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
+                print("Reached simple sell order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist and not self.macd_flag:
+                print("Reached complex sell order")
+                lot_size = LOT_SIZE
+                if self.slope < 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
+
+            print("Ask orders: ", self.order_book.asks)
+            print("Buy orders: ", self.order_book.bids)
+            print()
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
         # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
@@ -214,6 +296,8 @@ class AutoTrader(BaseAutoTrader):
         if self.last_time_called:
             while self.last_time_called[0] < time_limit:
                 self.last_time_called.pop(0)
+                if not self.last_time_called:
+                    break
 
         if (len(self.last_time_called) == 50):
             return
@@ -246,6 +330,9 @@ class AutoTrader(BaseAutoTrader):
         if self.last_time_called:
             while self.last_time_called[0] < time_limit:
                 self.last_time_called.pop(0)
+                if not self.last_time_called:
+                    break
+
 
         if (len(self.last_time_called) == 50):
             return
@@ -310,9 +397,13 @@ class AutoTrader(BaseAutoTrader):
 
     def calculate_sma(self, period: int):
         # currently hardcoded for the ETF or something
-        tail = self.market_prices[1][-period:]
+        tail = self.etf_market_price[-period:]
 
         return mean(tail)
+
+    def calculate_ema(self, period: int, prev_ema: float):
+        multiplier = 2/(period +1)
+        return self.etf_market_price[-1] * multiplier + prev_ema * (1-multiplier)
 
     def calculate_vwap(self, ask_prices: List[int], ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         bid_total_volume = 0
