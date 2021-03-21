@@ -37,6 +37,7 @@ UPDATE_LIST_SIZE = 5
 ORDER_LIMIT = 10
 RES_SUP_LENGTH = 500
 SIMPLE_ORDER_RANGE = 200
+ROLLING_LIMIT = 50
 
 
 class AutoTrader(BaseAutoTrader):
@@ -69,8 +70,8 @@ class AutoTrader(BaseAutoTrader):
         self.trade_update_number = [1, 1]
 
         # Current price we should put for ETF
-        self.bid = 0
-        self.ask = 0
+        self.bid = -1
+        self.ask = -1
 
         self.bid_vwap = 0
         self.ask_vwap = 0
@@ -167,15 +168,15 @@ class AutoTrader(BaseAutoTrader):
                 self.prev_ema_50 = ema_50
                 self.prev_ema_200 = ema_200
                 if self.event_loop.time() - 200 > self.start_time:
-                    if abs(self.macd) >= 90 and not self.macd:
+                    if abs(self.macd[-1]) >= 90 and not self.macd_flag:
                         self.macd_flag = True
-                    elif abs(self.macd) <= 10 and self.macd:
+                    elif abs(self.macd[-1]) <= 10 and self.macd_flag:
                         self.macd_flag = False
                     self.sma_list.append([self.event_loop.time(),self.etf_market_price[-1],sma_50,sma_200,inter,ema_26,ema_50,ema_200,macd])
                     df = pd.DataFrame(self.sma_list,columns=['Time','Market','SMA-50','SMA-200','Intersection','EMA-26','EMA-50','EMA-200','MACD'])
                     #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
                     #print(self.sma_list)
-                    #df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/example.csv")
+                    df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/example.csv")
 
                 self.calculate_vwap(ask_prices, ask_volumes,
                                     bid_prices, bid_volumes)
@@ -198,26 +199,39 @@ class AutoTrader(BaseAutoTrader):
             
             pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
             position = self.order_book.get_position()
-            if pnl != 0 and (pnl/100 >= abs(position) * self.scale_factor or pnl/100 >= 200):
-                print("Simple")
-                if position < 0:
-                    print("Price: ", self.bid)
-                    self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            if self.macd_flag:
+                print("MACD")
+                if self.macd[-1] < 0:
+                    self.logger.info("MACD BUY Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                    self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
                 else:
-                    print("Price: ", self.ask)
-                    self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+                    self.logger.info("MACD SELL Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                    self.send_sell_order(self.ask,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
             else:
-                if self.r2 >= 0.1:
-                    if self.support <= self.bid <= self.support + 100 and self.slope > 0:
-                        print("Complex")
-                        print("Price: ", self.bid)
-                        self.send_buy_order(self.bid, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                if pnl != 0 and (pnl/100 >= abs(position) * self.scale_factor or pnl/100 >= 200):
+                    #print("Simple")
+                    if position < 0:
+                        #print("Price: ", self.bid)
+                        self.logger.info("SIMPLE BUY Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                        self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+                    else:
+                        #print("Price: ", self.ask)
+                        self.logger.info("SIMPLE SELL Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                        self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+                else:
+                    if self.r2 >= 0.1:
+                        if self.support <= self.bid <= self.support + 100 and self.slope > 0:
+                            #print("Complex")
+                            #print("Price: ", self.bid)
+                            self.logger.info("COMPLEX BUY Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                            self.send_buy_order(self.bid, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
 
-                    elif self.resist - 100 <= self.ask <= self.resist and self.slope < 0:
-                        print("Complex")
-                        print("Price: ", self.ask)
-                        self.send_sell_order(self.ask, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                print()
+                        elif self.resist - 100 <= self.ask <= self.resist and self.slope < 0:
+                            #print("Complex")
+                            #print("Price: ", self.ask)
+                            self.logger.info("COMPLEX SELL Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                            self.send_sell_order(self.ask, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                    #print()
             self.order_update_number[instrument] = sequence_number
             
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
@@ -250,66 +264,18 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-            print("Average price is: ", self.order_book.get_average_price())
-            if self.macd_flag:
-                if self.macd[-1] < 0:
-                    self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
-                else:
-                    self.send_sell_order(self.ask,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
-            # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
-            if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
-                (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
-                print("Reached simple buy order")
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-            elif self.support <= self.bid <= self.support * (1 + self.bound_range) and not self.macd_flag:
-                print("Reached complex buy order")
-                lot_size = LOT_SIZE
-                if self.slope > 0 and self.r2 >= 0.1:
-                    lot_size *= 2
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
-
-            # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
-            # print()
-            if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
-                (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
-                print("Reached simple sell order")
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-            elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist and not self.macd_flag:
-                print("Reached complex sell order")
-                lot_size = LOT_SIZE
-                if self.slope < 0 and self.r2 >= 0.1:
-                    lot_size *= 2
-                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-                self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
-
-            print("Ask orders: ", self.order_book.asks)
-            print("Buy orders: ", self.order_book.bids)
-            print()
-
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
-        # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
-
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
-                if not self.last_time_called:
-                    break
-
-        if (len(self.last_time_called) == 50):
+        if not self.rolling_period_limit():
             return
-        else:
-            self.last_time_called.append(self.event_loop.time())
         
         id = next(self.order_ids)
         order = self.order_book.add_bid(price, lot_size, id)
         can = True
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
-            if order[1] == 0: #need to change this to account for volume limits too
+            if order[1] == 0 or order[1] == 1: #need to change this to account for volume limits too
+                if not self.rolling_period_limit():
+                    return
                 remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_bid(price, lot_size, id)
@@ -324,20 +290,8 @@ class AutoTrader(BaseAutoTrader):
             self.send_insert_order(id, Side.BUY, price, order[1], order_type)
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
-        # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
-
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
-                if not self.last_time_called:
-                    break
-
-
-        if (len(self.last_time_called) == 50):
+        if not self.rolling_period_limit():
             return
-        else:
-            self.last_time_called.append(self.event_loop.time())
 
         id = next(self.order_ids)
         order = self.order_book.add_ask(price, lot_size, id)
@@ -345,7 +299,9 @@ class AutoTrader(BaseAutoTrader):
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
             # If too many orders we can remove one and see if it works
-            if order[1] == 0: #need to change this to account for volume limits too
+            if order[1] == 0 or order[1] == 1: #need to change this to account for volume limits too
+                if not self.rolling_period_limit():
+                    return
                 remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
                 self.send_cancel_order(remove_id)
                 order = self.order_book.add_ask(price, lot_size, id)
@@ -464,6 +420,22 @@ class AutoTrader(BaseAutoTrader):
 
         self.slope = result.slope
         self.r2 = result.rvalue**2
+
+    def rolling_period_limit(self):
+        # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
+        time_limit = self.event_loop.time() - 1
+
+        if self.last_time_called:
+            while self.last_time_called[0] < time_limit:
+                self.last_time_called.pop(0)
+                if not self.last_time_called:
+                    break
+        self.logger.info("How many orders: %d",len(self.last_time_called))
+        if (len(self.last_time_called) == 50):
+            return False
+        else:
+            self.last_time_called.append(self.event_loop.time())
+        return True
 
 class OrderBook():
     def __init__(self):
