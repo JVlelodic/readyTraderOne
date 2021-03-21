@@ -167,9 +167,9 @@ class AutoTrader(BaseAutoTrader):
                 self.prev_ema_50 = ema_50
                 self.prev_ema_200 = ema_200
                 if self.event_loop.time() - 200 > self.start_time:
-                    if abs(self.macd) >= 90 and not self.macd:
+                    if abs(self.macd[-1]) >= 90 and not self.macd_flag:
                         self.macd_flag = True
-                    elif abs(self.macd) <= 10 and self.macd:
+                    elif abs(self.macd[-1]) <= 10 and self.macd_flag:
                         self.macd_flag = False
                     self.sma_list.append([self.event_loop.time(),self.etf_market_price[-1],sma_50,sma_200,inter,ema_26,ema_50,ema_200,macd])
                     df = pd.DataFrame(self.sma_list,columns=['Time','Market','SMA-50','SMA-200','Intersection','EMA-26','EMA-50','EMA-200','MACD'])
