@@ -175,7 +175,7 @@ class AutoTrader(BaseAutoTrader):
                     df = pd.DataFrame(self.sma_list,columns=['Time','Market','SMA-50','SMA-200','Intersection','EMA-26','EMA-50','EMA-200','MACD'])
                     #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
                     #print(self.sma_list)
-                    df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/example.csv")
+                    #df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/example.csv")
 
                 self.calculate_vwap(ask_prices, ask_volumes,
                                     bid_prices, bid_volumes)
@@ -250,44 +250,44 @@ class AutoTrader(BaseAutoTrader):
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
             self.trade_update_number[instrument] = sequence_number
 
-        print("Average price is: ", self.order_book.get_average_price())
-        if self.macd_flag:
-            if self.macd[-1] < 0:
-                self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
-            else:
-                self.send_sell_order(self.ask,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
-        # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
-        if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
-            (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
-            print("Reached simple buy order")
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-        elif self.support <= self.bid <= self.support * (1 + self.bound_range) and not self.macd_flag:
-            print("Reached complex buy order")
-            lot_size = LOT_SIZE
-            if self.slope > 0 and self.r2 >= 0.1:
-                lot_size *= 2
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
+            print("Average price is: ", self.order_book.get_average_price())
+            if self.macd_flag:
+                if self.macd[-1] < 0:
+                    self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
+                else:
+                    self.send_sell_order(self.ask,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
+            # print("Curr bid_price", self.bid, " Bounds are: ", self.support, " and ", self.support * (1+self.bound_range))
+            if (-200 < self.order_book.get_position() < 0 and self.order_book.get_average_price() - SIMPLE_ORDER_RANGE >= self.bid) or \
+                (self.order_book.get_position() < -200 and self.order_book.get_average_price() - (SIMPLE_ORDER_RANGE/2) >= self.bid):
+                print("Reached simple buy order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.support <= self.bid <= self.support * (1 + self.bound_range) and not self.macd_flag:
+                print("Reached complex buy order")
+                lot_size = LOT_SIZE
+                if self.slope > 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_buy_order(self.bid, lot_size, Lifespan.GOOD_FOR_DAY)
 
-        # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
-        # print()
-        if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
-            (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
-            print("Reached simple sell order")
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
-        elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist and not self.macd_flag:
-            print("Reached complex sell order")
-            lot_size = LOT_SIZE
-            if self.slope < 0 and self.r2 >= 0.1:
-                lot_size *= 2
-            self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
-            self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
+            # print("Curr ask_price", self.ask, " Bounds are: ", self.resist * (1 - self.bound_range), " and ", self.resist)
+            # print()
+            if (0 < self.order_book.get_position() < 200 and self.order_book.get_average_price() + SIMPLE_ORDER_RANGE <= self.ask) or \
+                (self.order_book.get_position() >= 200 and self.order_book.get_average_price() + (SIMPLE_ORDER_RANGE/2) <= self.ask):
+                print("Reached simple sell order")
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, VOLUME_LIMIT, Lifespan.GOOD_FOR_DAY)
+            elif self.resist * (1 - self.bound_range) <= self.ask <= self.resist and not self.macd_flag:
+                print("Reached complex sell order")
+                lot_size = LOT_SIZE
+                if self.slope < 0 and self.r2 >= 0.1:
+                    lot_size *= 2
+                self.logger.info("Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
+                self.send_sell_order(self.ask, lot_size, Lifespan.GOOD_FOR_DAY)
 
-        print("Ask orders: ", self.order_book.asks)
-        print("Buy orders: ", self.order_book.bids)
-        print()
+            print("Ask orders: ", self.order_book.asks)
+            print("Buy orders: ", self.order_book.bids)
+            print()
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
         # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
