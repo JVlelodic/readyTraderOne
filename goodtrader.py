@@ -35,9 +35,7 @@ VOLUME_LIMIT = 200
 TICK_SIZE_IN_CENTS = 100
 UPDATE_LIST_SIZE = 5
 ORDER_LIMIT = 10
-RES_SUP_LENGTH = 500
-SIMPLE_ORDER_RANGE = 200
-
+RES_SUP_LENGTH = 250
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -69,8 +67,8 @@ class AutoTrader(BaseAutoTrader):
         self.trade_update_number = [1, 1]
 
         # Current price we should put for ETF
-        self.bid = 0
-        self.ask = 0
+        self.bid = -1
+        self.ask = -1
 
         self.bid_vwap = 0
         self.ask_vwap = 0
@@ -171,8 +169,8 @@ class AutoTrader(BaseAutoTrader):
                     elif self.resist - 100 <= self.ask <= self.resist and self.slope < 0:
                         print("Complex")
                         print("Price: ", self.ask)
+                        print()
                         self.send_sell_order(self.ask, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                print()
             self.order_update_number[instrument] = sequence_number
             
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
@@ -209,28 +207,30 @@ class AutoTrader(BaseAutoTrader):
 
     def send_buy_order(self, price: int, lot_size: int, order_type: Lifespan):
         # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
+        # time_limit = self.event_loop.time() - 1
 
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
+        # if self.last_time_called:
+        #     while self.last_time_called[0] < time_limit:
+        #         self.last_time_called.pop(0)
 
-        if (len(self.last_time_called) == 50):
-            return
-        else:
-            self.last_time_called.append(self.event_loop.time())
+        # if (len(self.last_time_called) == 50):
+        #     return
+        # else:
+        #     self.last_time_called.append(self.event_loop.time())
         
         id = next(self.order_ids)
         order = self.order_book.add_bid(price, lot_size, id)
         can = True
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
-            if order[1] == 0: #need to change this to account for volume limits too
-                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
-                self.send_cancel_order(remove_id)
-                order = self.order_book.add_bid(price, lot_size, id)
-                if not order[0]:
-                    can = False
+            error_type = order[1]
+            if error_type == 0 or error_type == 1 or error_type == 2: #need to change this to account for volume limits too
+                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1], price, lot_size, Side.BID)
+                if remove_id:
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_bid(price, lot_size, id)
+                    if not order[0]:
+                        can = False
             # Volume exceed just dont do anything
             else:
                 can = False
@@ -241,29 +241,30 @@ class AutoTrader(BaseAutoTrader):
 
     def send_sell_order(self, price: int, lot_size: int, order_type: Lifespan):
         # Orders for both buy and sell cannot exceed 50 in a 1 second rolling period
-        time_limit = self.event_loop.time() - 1
+        # time_limit = self.event_loop.time() - 1
 
-        if self.last_time_called:
-            while self.last_time_called[0] < time_limit:
-                self.last_time_called.pop(0)
+        # if self.last_time_called:
+        #     while self.last_time_called[0] < time_limit:
+        #         self.last_time_called.pop(0)
 
-        if (len(self.last_time_called) == 50):
-            return
-        else:
-            self.last_time_called.append(self.event_loop.time())
+        # if (len(self.last_time_called) == 50):
+        #     return
+        # else:
+        #     self.last_time_called.append(self.event_loop.time())
 
         id = next(self.order_ids)
         order = self.order_book.add_ask(price, lot_size, id)
         can = True
         # We could not enter an order here for two reasons. Either volume/position limit exceeded, OR too many orders.
         if not order[0]:
-            # If too many orders we can remove one and see if it works
-            if order[1] == 0: #need to change this to account for volume limits too
-                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1])
-                self.send_cancel_order(remove_id)
-                order = self.order_book.add_ask(price, lot_size, id)
-                if not order[0]:
-                    can = False
+            error_type = order[1]
+            if error_type == 0 or error_type == 1 or error_type == 2: #need to change this to account for volume limits too
+                remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1], price, lot_size, Side.ASK)
+                if remove_id:
+                    self.send_cancel_order(remove_id)
+                    order = self.order_book.add_ask(price, lot_size, id)
+                    if not order[0]:
+                        can = False
             # Volume exceed just dont do anything
             else:
                 can = False
@@ -546,7 +547,7 @@ class OrderBook():
                 return
 
 
-    def remove_least_useful_order(self, market_price: int):
+    def remove_least_useful_order(self, market_price: int, price: int, lot_size: int, side: Side):
         """removes the order on the side specified which is furthest away, in terms of price, from the current market price
 
         returns: order_id of order removed
@@ -555,6 +556,8 @@ class OrderBook():
         """
         max_diff = -1
         order_id = -1
+        order = None
+        remove_side = None
         
         # bids and asks will be structured [price, vol, order_id]
 
@@ -564,6 +567,8 @@ class OrderBook():
             if curr_diff > max_diff or (curr_diff == max_diff and bid[2] > order_id):
                 max_diff = curr_diff
                 order_id  = bid[2]
+                order = bid
+                remove_side = Side.BID
         
         for i in range(len(self.asks)):
             ask = self.asks[i]
@@ -571,6 +576,11 @@ class OrderBook():
             if curr_diff > max_diff or (curr_diff == max_diff and ask[2] > order_id):
                 max_diff = curr_diff
                 order_id = ask[2]
+                order = ask
+                remove_side = Side.ASK
+        
+        if order[0] == price and order[1] == lot_size and side == remove_side:
+            return None    
         
         self.remove_order(order_id)
         return order_id
