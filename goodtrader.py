@@ -89,6 +89,11 @@ class AutoTrader(BaseAutoTrader):
         self.prev_sma_diff = 0
         self.sma_intersections = []
         self.sma_list = []
+        self.prev_ema_9 = 0
+        self.prev_ema_12 = 0
+        self.prev_ema_26 = 0
+        self.prev_ema_50 = 0
+        self.prev_ema_200 = 0
 
         # Most recent resistance line value
         self.resist = 0
@@ -147,8 +152,14 @@ class AutoTrader(BaseAutoTrader):
                         inter = True
                 self.prev_sma_diff = sma_diff
 
-                self.sma_list.append([self.event_loop.time(),sma_50,sma_200,inter])
-                df = pd.DataFrame(self.sma_list,columns=['Time','SMA-50','SMA-200','Intersection'])
+                ema_9 = self.calculate_ema(9,self.prev_ema_9)
+                ema_12 = self.calculate_ema(12,self.prev_ema_12)
+                ema_26 = self.calculate_ema(26,self.prev_ema_26)
+                ema_50 = self.calculate_ema(50,self.prev_ema_50)
+                ema_200 = self.calculate_ema(200,self.prev_ema_200)
+                macd = ema_12 - ema_26
+                self.sma_list.append([self.event_loop.time(),sma_50,sma_200,inter,ema_9,ema_12,ema_26,ema_50,ema_200,macd])
+                df = pd.DataFrame(self.sma_list,columns=['Time','SMA-50','SMA-200','Intersection','EMA-9','EMA-12','EMA-26','EMA-50','EMA-200','MACD'])
                 #fig = df.plot(x="Time",y=["SMA-20","SMA-100"])
                 #print(self.sma_list)
                 df.to_csv(path_or_buf="/home/posocer/Documents/projects/trader/readyTraderOne/plot.csv")
@@ -360,6 +371,10 @@ class AutoTrader(BaseAutoTrader):
         tail = self.etf_market_price[-period:]
 
         return mean(tail)
+
+    def calculate_ema(self, period: int, prev_ema: float):
+        multiplier = 2/(period +1)
+        return self.etf_market_price[-1] * multiplier + prev_ema * (1-multiplier)
 
     def calculate_vwap(self, ask_prices: List[int], ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         bid_total_volume = 0
