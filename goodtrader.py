@@ -138,11 +138,6 @@ class AutoTrader(BaseAutoTrader):
         df1 = pd.DataFrame(self.pnl, columns = ["Time", "Self PNL"])
         df1.to_csv("profit.csv")
         
-        inst = "Future" if instrument == Instrument.FUTURE else "ETF"
-        self.logger.info(f'Instrument Type: {inst}')
-        self.logger.info(f'Sequence number is {sequence_number}' )
-        self.logger.info(f'Current ORDER number is {self.order_update_number}')
-        self.logger.info("\n")
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
@@ -204,7 +199,6 @@ class AutoTrader(BaseAutoTrader):
             pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
             position = self.order_book.get_position()
             if self.macd_flag:
-                print("MACD")
                 if self.macd[-1] < 0:
                     # self.logger.info("MACD BUY Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
                     self.send_buy_order(self.bid,LOT_SIZE,Lifespan.GOOD_FOR_DAY)
@@ -263,11 +257,6 @@ class AutoTrader(BaseAutoTrader):
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int],
                                ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         
-        inst = "Future" if instrument == Instrument.FUTURE else "ETF"
-        self.logger.info(f'Instrument Type: {inst}')
-        self.logger.info(f'Sequence number is {sequence_number}' )
-        self.logger.info(f'Current TRADE number is {self.trade_update_number}')
-        self.logger.info("\n")
         if sequence_number > self.trade_update_number[instrument]:
             self.calculate_market_price(
                 instrument, ask_prices, bid_prices, ask_volumes, bid_volumes)
@@ -288,8 +277,9 @@ class AutoTrader(BaseAutoTrader):
                 if remove_id:
                     self.send_cancel_order(remove_id)
                     order = self.order_book.add_bid(price, lot_size, id)
-                    if not order[0]:
-                        can = False
+                
+                if not order[0] or not remove_id:
+                    can = False
             # Volume exceed just dont do anything
             else:
                 can = False
@@ -313,8 +303,9 @@ class AutoTrader(BaseAutoTrader):
                 if remove_id:
                     self.send_cancel_order(remove_id)
                     order = self.order_book.add_ask(price, lot_size, id)
-                    if not order[0]:
-                        can = False
+                
+                if not order[0] or not remove_id:
+                    can = False
             # Volume exceed just dont do anything
             else:
                 can = False
@@ -621,6 +612,7 @@ class OrderBook():
                 self.volume -= bid[1]
                 self.vol_bids -= bid[1]
                 self.bids.pop(i)
+                self.cancelled_orders[order_id] = Side.BID
                 return 
 
 
@@ -632,6 +624,7 @@ class OrderBook():
                 self.volume -= ask[1]
                 self.vol_asks -= ask[1]
                 self.asks.pop(i)
+                self.cancelled_orders[order_id] = Side.ASK
                 return
 
 
@@ -667,7 +660,12 @@ class OrderBook():
                 order = ask
                 remove_side = Side.ASK
         
-        if order[0] == price and side == remove_side:
+        print("ID is: ", order_id)
+        print("Order is: ", order)
+        print("BIDS: ", self.bids)
+        print("ASKS: ", self.asks)
+        print()
+        if order[0] == price and side == remove_side and order[1] >= LOT_SIZE:
             return None    
         
         self.remove_order(order_id)
