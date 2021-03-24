@@ -445,7 +445,8 @@ class AutoTrader(BaseAutoTrader):
                 self.last_time_called.pop(0)
                 if not self.last_time_called:
                     break
-        if (len(self.last_time_called) == 50):
+        #self.logger.info("How many orders: %d",len(self.last_time_called))
+        if (len(self.last_time_called) == ROLLING_LIMIT):
             return False
         else:
             self.last_time_called.append(self.event_loop.time())
@@ -637,8 +638,8 @@ class OrderBook():
                 self.cancelled_orders[order_id] = Side.ASK
                 return
 
-
     def remove_least_useful_order(self, market_price: int, price: int, side: Side):
+
         """removes the order on the side specified which is furthest away, in terms of price, from the current market price
 
         returns: order_id of order removed
@@ -672,7 +673,6 @@ class OrderBook():
 
         if order[0] == price and side == remove_side:
             return None    
-
         self.remove_order(order_id)
         return order_id
 
