@@ -245,9 +245,9 @@ class AutoTrader(BaseAutoTrader):
         """
         # currently we do not account for market orders as we do not do them
         #self.execute_order += 1
-        self.logger.info("On order filled: Position before: %d Order ID: %d PRICE: %d, VOLUME: %d ",self.order_book.position,client_order_id,price,volume)
+        self.logger.info("On order filled: Position before: %d Order ID: %d VOLUME: %d VOL_ASK: %d VOL_BID %d VOLUME_ORDERBOOK %d",self.order_book.position,client_order_id,volume,self.order_book.vol_asks, self.order_book.vol_bids, self.order_book.volume)
         self.order_book.amend_order(self,volume, client_order_id)
-        self.logger.info("On order filled: Position after: %d Order ID: %d PRICE: %d, VOLUME: %d ",self.order_book.position,client_order_id,price,volume)
+        self.logger.info("On order filled: Position after: %d Order ID: %d VOLUME: %d VOL_ASK: %d VOL_BID %d VOLUME_ORDERBOOK %d",self.order_book.position,client_order_id,volume,self.order_book.vol_asks, self.order_book.vol_bids, self.order_book.volume)
 
     # def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
     #                             fees: int) -> None:
@@ -283,10 +283,14 @@ class AutoTrader(BaseAutoTrader):
                     return
                 remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1], price, Side.BID)
                 if remove_id:
+                    self.logger.info("Removed order: %d",remove_id)
                     self.send_cancel_order(remove_id)
                     order = self.order_book.add_bid(price, lot_size, id)
                     if not order[0]:
+                        self.logger.info("Just straight up removed it")
                         can = False
+                    else:
+                        self.logger.info("We removed an order and then successfully added one into the orderbook so we should see an insert for order id: %d",id)
                 else:
                     return
             # Volume exceed just dont do anything
@@ -312,10 +316,14 @@ class AutoTrader(BaseAutoTrader):
                     return
                 remove_id = self.order_book.remove_least_useful_order(self.etf_market_price[-1],price,Side.ASK)
                 if remove_id:
+                    self.logger.info("Removed order: %d",remove_id)
                     self.send_cancel_order(remove_id)
                     order = self.order_book.add_ask(price, lot_size, id)
                     if not order[0]:
+                        self.logger.info("Just straight up removed it")
                         can = False
+                    else:
+                        self.logger.info("We removed an order and then successfully added one into the orderbook so we should see an insert for order id: %d",id)
                 else:
                     return
             # Volume exceed just dont do anything
@@ -477,7 +485,7 @@ class OrderBook():
         self.last_buy = 0
         self.last_sell = 0
 
-        self.cancelled_orders: Dict[int,[Side,int]] = {}
+        self.cancelled_orders: Dict[int,Side] = {}
 
     def add_bid(self, price: int, vol: int, order_id: int):
         """
@@ -599,7 +607,7 @@ class OrderBook():
         if order_id in self.cancelled_orders:
             trader.logger.error("But then it got fixed")
             order = self.cancelled_orders.get(order_id)
-            if order[0] == Side.ASK:
+            if order == Side.ASK:
                 self.position -= vol
                 self.future_position += vol
             else:
@@ -630,7 +638,7 @@ class OrderBook():
                 self.volume -= ask[1]
                 self.vol_asks -= ask[1]
                 self.asks.pop(i)
-                self.cancelled_orders[order_id] = Side.BID
+                self.cancelled_orders[order_id] = Side.ASK
                 return
 
 
