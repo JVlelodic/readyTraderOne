@@ -82,7 +82,7 @@ class AutoTrader(BaseAutoTrader):
         self.future_market_price = [0]
 
         # List of market price for ETF
-        self.etf_market_price = []
+        self.etf_market_price = [0]
 
         # Variables used for SMA BUY SELL strategy
         self.sma_50 = []
@@ -131,15 +131,8 @@ class AutoTrader(BaseAutoTrader):
         messages. The five best available ask (i.e. sell) and bid (i.e. buy)
         prices are reported along with the volume available at each of those
         price levels.
-        """
-        #Add 0 to list instead
-        
-        pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
-        #DELETE
-        self.pnl.append([self.event_loop.time(), pnl])
-        df1 = pd.DataFrame(self.pnl, columns = ["Time", "Self PNL"])
-        df1.to_csv("profit.csv")
-        
+        """        
+    
        # Only recalculate average on new sequence number
         if sequence_number > self.order_update_number[instrument]:
             if instrument == Instrument.ETF:
@@ -198,7 +191,12 @@ class AutoTrader(BaseAutoTrader):
                 else:
                     self.bid = bid_prices[0] - 100
             
-                pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1])
+                pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1], self.etf_market_price[-1])
+
+                self.pnl.append([self.event_loop.time(), pnl])
+                df1 = pd.DataFrame(self.pnl, columns = ["Time", "Self PNL"])
+                df1.to_csv("profit.csv")
+                
                 position = self.order_book.get_position()
                 if self.macd_flag:
                     #print("MACD")
@@ -336,26 +334,12 @@ class AutoTrader(BaseAutoTrader):
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int], ask_volumes: List[int], bid_volumes: List[int]) -> None:
 
-        if instrument == Instrument.FUTURE:
-            last_traded = self.get_last_traded_price(ask_prices, bid_prices)
-            if last_traded: 
+        last_traded = self.get_last_traded_price(ask_prices, bid_prices)
+        if last_traded: 
+            if instrument == Instrument.FUTURE:
                 self.future_market_price.append(last_traded)
-        else:
-            #Instrument is ETF
-            # last_future_price = self.future_market_price[-1] if len(self.future_market_price) > 0 else last_traded
-            # etf_price = round(max(last_future_price * 0.998, min(last_future_price * 1.002, last_traded)))
-            # self.etf_market_price.append(etf_price)
-            # self.track_market_price.append([self.event_loop.time(), etf_price])
-            total_volume = 0
-            total_price = 0
-            for i in range(UPDATE_LIST_SIZE):
-                total_volume += bid_volumes[i] + ask_volumes[i]
-                total_price += bid_volumes[i] * \
-                    bid_prices[i] + ask_volumes[i] * ask_prices[i]
-
-            average_price = total_price // total_volume if total_volume != 0 else 0
-            if(average_price != 0):
-                self.etf_market_price.append(average_price)
+            else:
+                self.etf_market_price.append(last_traded)
 
     def get_last_traded_price(self, ask_prices: List[int], bid_prices: List[int]) -> Optional[int]:
         last_price = None
@@ -717,13 +701,7 @@ class OrderBook():
                     self.total_sell_volume = 0
                     self.average_price = 0
 
-    def calc_profit_or_loss(self, future_price: int):
-        if self.position == 0:
-            etf_price = 0
-        elif self.position > 0:
-            etf_price = self.last_buy
-        else:
-            etf_price = self.last_sell
+    def calc_profit_or_loss(self, future_price: int, etf_price: int):
         delta: int = round(0.02 * future_price)
         delta -= delta % 100
         min_price: int = future_price - delta
