@@ -153,7 +153,7 @@ class AutoTrader(BaseAutoTrader):
                 pnl = self.order_book.calc_profit_or_loss(self.future_market_price[-1], self.etf_market_price[-1])
                 diff = self.etf_market_price[-1] - self.future_market_price[-1]
                 position = self.order_book.get_position()
-                magic_value = 3
+                magic_value = 2
                 if self.macd_flag:
                     if self.macd[-1] < 0:
                         if diff <= magic_value:
@@ -272,7 +272,6 @@ class AutoTrader(BaseAutoTrader):
                 can = False
 
         if can:
-            #self.logger.info("SELL Volume sent in is: %d Order ID is: %d Position: %d Volume: %d Bid Volume: %d Ask Volume: %d",order[1], id, self.order_book.position, self.order_book.volume, self.order_book.vol_bids, self.order_book.vol_asks)
             self.send_insert_order(id, Side.SELL, price, order[1], order_type)
 
     def calculate_market_price(self, instrument: int, ask_prices: List[int], bid_prices: List[int], ask_volumes: List[int], bid_volumes: List[int]) -> None:
